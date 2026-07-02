@@ -1,0 +1,54 @@
+- [x] App.tsx dosyasının eksik kalan bölümünü tamamen incele
+- [x] JSX kapanış ve sayfa bloklarını sentaks hatasız şekilde tamamla
+- [ ] Server tarafında route mount / auth / queue-sse akış uyumsuzluklarını düzelt
+  - [x] auth middleware + server boot + route/SSE/worker dosyalarını analiz et
+  - [x] dosya bazlı düzeltme planını çıkar ve onay al
+  - [x] server bootstrap akışını tekilleştir (index/server uyumu)
+  - [x] import uzantı ve attach sırası tutarlılığını düzelt
+  - [x] route/action response formatı tutarlılık kontrolü
+  - [x] index.ts sade entrypoint'e çek ve server.ts buildServer/startWorkers akışını tek kaynak yap
+  - [x] auth middleware hata formatlarını `{ ok:false, error:{ code, message } }` ile standardize et
+  - [ ] apps/server TypeScript build/check çalıştır
+  - [ ] health + auth + action enqueue + SSE smoke test
+- [ ] Sağ panel sayfalarını (özellikle XML, Ürünler, Kategori, Varyant, Marka, Şablon, Pazaryeri, Gönderim, Sipariş, Rapor, Ayar, Log) tek tek işlevsel doldur
+  - [x] sağ panelin mevcut App.tsx yapısını analiz et
+  - [x] sağ paneli kalıcı üst özet + alt modül içerik düzenine taşıma planını netleştir
+  - [x] App.tsx içinde layout refactor (kalıcı üst blok + alt detay blok)
+  - [x] XML sekmesini form + kaynak listesi + fallback aksiyonları ile tamamla
+  - [ ] Şablon sekmesini şablon listesi + oluşturma alanı ile tamamla
+  - [ ] Gönderim sekmesini gönderi kuyruğu tablosu + durum kartları ile tamamla
+  - [ ] Sipariş sekmesini sipariş listesi + filtre kartları ile tamamla
+  - [ ] Rapor sekmesini KPI + dönemsel özet kartları ile tamamla
+  - [ ] Ayar sekmesini sistem/entegrasyon/yönetici aksiyon panelleri ile tamamla
+  - [ ] Ortak section başlık/stil yapısını tüm sekmelere uygula
+  - [ ] types.ts gerekiyorsa yeni payload tipleriyle genişlet
+  - [ ] UI build/doğrulama çalıştır
+- [ ] Web App.tsx içinde ilgili sayfalara gerçek listeleme + ekleme + güncelleme akışlarını bağla
+- [ ] Tipleri (apps/web/src/types.ts) yeni API payloadlarıyla uyumlu genişlet
+- [ ] Web uygulamasını yeniden açıp tüm sayfaları tek tek doğrula
+- [ ] Backend endpointlerini curl ile happy/error/edge-case test et
+- [ ] Test bulgularına göre gerekli düzeltmeleri uygula
+- [ ] Son durum raporunu paylaş
+
+- [x] UI dark tema dönüşümü için global stil altyapısını güncelle (`apps/web/src/index.css`)
+- [x] App layout ve component class'larını ilk referans görseldeki renk paletine geçir (`apps/web/src/App.tsx`)
+- [x] Menü/başlık/kart/buton görsellerini neon vurgulu koyu tasarıma hizala
+- [x] Görsel tutarlılık kontrolü için çalıştırma doğrulama adımını tamamla
+
+- [ ] Ürünler sayfası sütunlarını tek tek zenginleştir (ürün özeti + fiyat + stok durumu + işlem sütunu)
+- [ ] Ürünler tablosuna üst KPI satırı ve toplu aksiyon alanı ekle
+- [ ] Ürünler sayfasını manuel kontrol edip bir sonraki sayfaya (XML) geç
+- [ ] Admin login endpointini ekle (JWT cookie + role=ADMIN)
+- [ ] Sadece ADMIN için şifre değiştirme endpointi ekle (`POST /admin/change-password`)
+- [ ] Ayarlar ekranında yalnız admin için “Yönetici İşlemleri” panelini göster
+- [ ] Curl ile admin/normal kullanıcı yetki testlerini tamamla (happy/error/edge)
+
+- [ ] Kritik-path: Kontrol Paneli'ni gerçek KPI + sağlık özeti ile kullanılabilir hale getir
+- [ ] Kritik-path: Ürünler modülünü gerçek veri + arama + filtre + tablo görünümüyle tamamla
+- [ ] Kritik-path: Pazaryerleri modülünü durum yönetimi + sync akışıyla güçlendir
+- [ ] Kritik-path tiplerini `apps/web/src/types.ts` içinde genişlet ve type-safe hale getir
+- [ ] Kritik-path modüller için thorough test (build + ui walkthrough) yap
+
+- [ ] Bu iterasyonda: sol menü sırasıyla modülleri tamamlama (Kontrol Paneli -> XML -> Ürünler -> Kategori -> Varyant -> Marka -> Şablon -> Pazaryeri -> Gönderim -> Sipariş -> Rapor -> Ayar -> Log)
+- [ ] Bu iterasyonda: apps/web/src/types.ts tip genişletmeleri
+- [ ] Bu iterasyonda: web+server build ve UI/API testleri

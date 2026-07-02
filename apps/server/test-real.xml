@@ -1,0 +1,18 @@
+<products>
+  <product>
+    <xmlKey>REAL-001</xmlKey>
+    <title>Gerçek Ürün 1</title>
+    <sku>SKU-REAL-001</sku>
+    <barcode>9000000001</barcode>
+    <stock>15</stock>
+    <minStock>3</minStock>
+  </product>
+  <product>
+    <xmlKey>REAL-002</xmlKey>
+    <title>Gerçek Ürün 2</title>
+    <sku>SKU-REAL-002</sku>
+    <barcode>9000000002</barcode>
+    <stock>8</stock>
+    <minStock>2</minStock>
+  </product>
+</products>

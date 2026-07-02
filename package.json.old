@@ -1,0 +1,22 @@
+{
+  "name": "dg-stok-integrator",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev --workspace apps/server\" \"npm:dev --workspace apps/web\"",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "prisma": "^5.22.0"
+  },
+  "dependencies": {
+    "@babel/core": "^7.29.7",
+    "@prisma/client": "^5.22.0"
+  }
+}

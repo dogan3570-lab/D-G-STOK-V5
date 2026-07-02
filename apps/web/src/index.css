@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: #d6e4ff;
+  background:
+    radial-gradient(1200px 600px at 20% -20%, rgba(32, 132, 252, 0.18), transparent 60%),
+    radial-gradient(1000px 500px at 100% 0%, rgba(18, 238, 181, 0.08), transparent 55%),
+    linear-gradient(160deg, #030711 0%, #071225 40%, #040b18 100%);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(120, 153, 206, 0.24);
+  background: linear-gradient(180deg, rgba(12, 23, 45, 0.92), rgba(8, 16, 33, 0.9));
+  box-shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.glass-card {
+  background: linear-gradient(180deg, rgba(11, 22, 44, 0.94), rgba(8, 16, 33, 0.92));
+  border: 1px solid rgba(119, 155, 212, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 24px -14px rgba(0, 0, 0, 0.9);
+}
+
+.neon-border {
+  border: 1px solid rgba(0, 224, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(0, 224, 255, 0.12), 0 0 24px -12px rgba(0, 224, 255, 0.5);
+}
+
+.neon-green {
+  border-color: rgba(0, 255, 170, 0.45) !important;
+  box-shadow: 0 0 0 1px rgba(0, 255, 170, 0.12), 0 0 24px -12px rgba(0, 255, 170, 0.45) !important;
+}
