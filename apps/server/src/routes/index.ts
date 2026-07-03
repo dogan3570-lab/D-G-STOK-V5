@@ -4,6 +4,8 @@ import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
 import { actionsRouter } from './actions.ts';
 import { fetchXmlFromUrl, importXmlProducts } from '../services/xmlImport.ts';
+import xmlSourcesRoutes from './xmlSources';
+import categoriesRoutes from './categories';
 
 export function attachRoutes(app: import('express').Express) {
   // Health/API status were already registered in apps/server/src/index.ts.
@@ -25,6 +27,8 @@ function handleDbError(res: import('express').Response, error: unknown) {
 }
 
 router.use('/actions', actionsRouter);
+router.use('/xml-sources', xmlSourcesRoutes);
+router.use('/categories', categoriesRoutes);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
@@ -129,13 +133,63 @@ router.delete('/marketplaces/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR'
   }
 });
 
-router.get('/products', async (_req, res) => {
+router.get('/products', async (req, res) => {
   try {
-    const items = await prisma.product.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 200,
+    const search = String(req.query?.search ?? '').trim();
+    const categoryId = req.query?.categoryId ? String(req.query.categoryId) : null;
+    const brandId = req.query?.brandId ? String(req.query.brandId) : null;
+    const status = req.query?.status ? String(req.query.status) : null;
+    const lowStock = req.query?.lowStock === 'true';
+    const page = Math.max(1, Number(req.query?.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query?.limit ?? 50)));
+    const skip = (page - 1) * limit;
+
+    const where: Record<string, unknown> = {};
+    
+    if (search) {
+      where.OR = [
+        { title: { contains: search } },
+        { xmlKey: { contains: search } },
+        { sku: { contains: search } },
+        { barcode: { contains: search } },
+      ];
+    }
+    
+    if (categoryId) {
+      where.categoryId = categoryId;
+    }
+    
+    if (brandId) {
+      where.brandId = brandId;
+    }
+    
+    if (status) {
+      where.status = status;
+    }
+    
+    if (lowStock) {
+      where.stock = { lte: 0 };
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    return res.json({ 
+      items, 
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     });
-    return res.json({ items });
   } catch (error) {
     return handleDbError(res, error);
   }

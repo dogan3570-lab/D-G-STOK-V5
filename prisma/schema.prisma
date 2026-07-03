@@ -7,8 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// SQLite-compatible schema: use plain strings instead of enums/Json
-
 model User {
   id        String    @id @default(uuid())
   email     String    @unique
@@ -34,6 +32,10 @@ model Product {
   title                  String?
   sku                    String?
   barcode                String?
+  categoryId             String?
+  category               Category?               @relation(fields: [categoryId], references: [id])
+  brandId                String?
+  brand                  Brand?                  @relation(fields: [brandId], references: [id])
   categoryMatch          Boolean                 @default(false)
   variantMatch           Boolean                 @default(false)
   brandMatch             Boolean                 @default(false)
@@ -45,6 +47,7 @@ model Product {
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   marketplaceStates      ProductMarketplaceState[]
+  variants               Variant[]
 }
 
 model ProductMarketplaceState {
@@ -126,3 +129,57 @@ model AuditLog {
   actorUser   User? @relation(fields: [actorUserId], references: [id])
 }
 
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  externalId  String?
+  parentId    String?
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Brand {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  externalId  String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Variant {
+  id          String    @id @default(uuid())
+  name        String
+  value       String
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([productId, name, value])
+}
+
+model Order {
+  id          String    @id @default(uuid())
+  orderNo     String    @unique
+  channel     String
+  customerName String
+  status      String    @default("new")
+  total       Float
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Shipment {
+  id            String    @id @default(uuid())
+  orderId       String?
+  channel       String
+  cargoCompany  String
+  trackingNo    String
+  status        String    @default("queued")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
