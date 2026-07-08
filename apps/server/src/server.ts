@@ -85,6 +85,34 @@ export function buildServer() {
     });
   });
 
+  // Get current user info (for Settings page role check)
+  app.get('/auth/me', async (req, res) => {
+    const token = req.cookies?.token;
+    if (!token) {
+      return res.status(401).json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'unauthorized' } });
+    }
+
+    try {
+      const decoded = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload & { sub?: string; role?: string };
+      if (!decoded?.sub) {
+        return res.status(401).json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'unauthorized' } });
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: String(decoded.sub) },
+        select: { id: true, email: true, role: true, name: true },
+      });
+
+      if (!user) {
+        return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
+      }
+
+      return res.json(user);
+    } catch {
+      return res.status(401).json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'invalid token' } });
+    }
+  });
+
   // Seed admin user (development only)
   app.post('/debug/seed-admin', async (req, res) => {
     const existing = await prisma.user.count({ where: { email: 'admin@dgstok.com' } });
