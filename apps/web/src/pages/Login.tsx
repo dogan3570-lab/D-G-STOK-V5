@@ -26,6 +26,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       const data = await response.json();
 
       if (data.ok) {
+        localStorage.setItem('dgstok_loggedin', 'true');
         onLoginSuccess();
       } else {
         setError('E-posta veya şifre hatalı');

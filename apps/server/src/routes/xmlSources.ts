@@ -14,26 +14,10 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     });
 
     const items = await Promise.all(sources.map(async (source) => {
-      const importRuns = await prisma.xmlImportRun.findMany({
-        where: { sourceId: source.id },
-        select: { id: true },
+      // Ürün sayısını xmlSourceId üzerinden doğrudan hesapla (kalıcı saklama)
+      const productCount = await prisma.product.count({
+        where: { xmlSourceId: source.id },
       });
-      const importRunIds = importRuns.map(r => r.id);
-      
-      let productCount = 0;
-      if (importRunIds.length > 0) {
-        const importItems = await prisma.xmlImportItemResult.findMany({
-          where: { importRunId: { in: importRunIds } },
-          select: { xmlKey: true },
-          distinct: ['xmlKey'],
-        });
-        const xmlKeys = importItems.map(item => item.xmlKey);
-        if (xmlKeys.length > 0) {
-          productCount = await prisma.product.count({
-            where: { xmlKey: { in: xmlKeys } },
-          });
-        }
-      }
 
       return {
         id: source.id,
@@ -175,15 +159,25 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /xml-sources/:id - Delete XML source with cascade
+// DELETE /xml-sources/:id - Delete XML source
+// Ürünler silinmez, veritabanında kalıcı olarak saklanır
+// Kullanıcı XML kaynağını kaldırana kadar ürünler durur
 router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
+    // Sadece import kayıtlarını temizle, ürünleri silme
     await prisma.xmlImportItemResult.deleteMany({
       where: { importRun: { sourceId: id } },
     });
     await prisma.xmlImportRun.deleteMany({ where: { sourceId: id } });
+    
+    // Ürünlerin xmlSourceId bağlantısını kaldır (ama ürünleri silme)
+    await prisma.product.updateMany({
+      where: { xmlSourceId: id },
+      data: { xmlSourceId: null },
+    });
+    
     await prisma.xmlSource.delete({ where: { id } });
 
     res.status(204).send();
@@ -542,6 +536,7 @@ router.post('/:id/pricing/preview', requireAuth, async (req: Request, res: Respo
 });
 
 // GET /xml-sources/:id/products - Get products imported from a specific XML source
+// Ürünler xmlSourceId üzerinden doğrudan çekilir (kalıcı saklama)
 router.get('/:id/products', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -550,31 +545,8 @@ router.get('/:id/products', requireAuth, async (req: Request, res: Response) => 
     const limit = Math.min(100, Math.max(10, Number(req.query?.limit ?? 50)));
     const skip = (page - 1) * limit;
 
-    const importRuns = await prisma.xmlImportRun.findMany({
-      where: { sourceId: id },
-      select: { id: true },
-    });
-
-    const importRunIds = importRuns.map(r => r.id);
-
-    if (importRunIds.length === 0) {
-      return res.json({ items: [], pagination: { page, limit, total: 0, totalPages: 0 } });
-    }
-
-    const importItems = await prisma.xmlImportItemResult.findMany({
-      where: { importRunId: { in: importRunIds } },
-      select: { xmlKey: true },
-      distinct: ['xmlKey'],
-    });
-
-    const xmlKeys = importItems.map(item => item.xmlKey);
-
-    if (xmlKeys.length === 0) {
-      return res.json({ items: [], pagination: { page, limit, total: 0, totalPages: 0 } });
-    }
-
     const where: Record<string, unknown> = {
-      xmlKey: { in: xmlKeys },
+      xmlSourceId: id,
     };
 
     if (search) {

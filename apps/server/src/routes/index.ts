@@ -6,13 +6,16 @@ import { actionsRouter } from './actions.ts';
 import { fetchXmlFromUrl, importXmlProducts } from '../services/xmlImport.ts';
 import xmlSourcesRoutes from './xmlSources.ts';
 import categoriesRoutes from './categories.ts';
+import variantsRoutes from './variants.ts';
+import automationRoutes from './automation.ts';
+import reportsRoutes from './reports.ts';
+
+export const router = Router();
 
 export function attachRoutes(app: import('express').Express) {
   // Health/API status were already registered in apps/server/src/index.ts.
   app.use('/', router);
 }
-
-export const router = Router();
 
 function handleDbError(res: import('express').Response, error: unknown) {
   // eslint-disable-next-line no-console
@@ -29,6 +32,9 @@ function handleDbError(res: import('express').Response, error: unknown) {
 router.use('/actions', actionsRouter);
 router.use('/xml-sources', xmlSourcesRoutes);
 router.use('/categories', categoriesRoutes);
+router.use('/variants', variantsRoutes);
+router.use('/automation', automationRoutes);
+router.use('/reports', reportsRoutes);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
@@ -81,14 +87,32 @@ router.post('/marketplaces', requireAuth, requireRole(['ADMIN', 'OPERATOR']), as
   const key = String(req.body?.key ?? '').trim();
   const name = String(req.body?.name ?? '').trim();
   const apiStatus = String(req.body?.apiStatus ?? 'unknown').trim() || 'unknown';
+  const apiKey = req.body?.apiKey ? String(req.body.apiKey).trim() : null;
+  const apiSecret = req.body?.apiSecret ? String(req.body.apiSecret).trim() : null;
+  const apiUrl = req.body?.apiUrl ? String(req.body.apiUrl).trim() : null;
+  const sellerId = req.body?.sellerId ? String(req.body.sellerId).trim() : null;
 
   if (!key || !name) {
     return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'key ve name zorunludur' } });
   }
 
+  // Ek alanları settings JSON'ında sakla
+  const settings: Record<string, string> = {};
+  if (sellerId) settings.sellerId = sellerId;
+  if (apiKey) settings.apiKey = apiKey;
+  if (apiSecret) settings.apiSecret = apiSecret;
+
   try {
     const created = await prisma.marketplace.create({
-      data: { key, name, apiStatus },
+      data: { 
+        key, 
+        name, 
+        apiStatus,
+        apiKey: apiKey || undefined,
+        apiSecret: apiSecret || undefined,
+        apiUrl: apiUrl || undefined,
+        settings: Object.keys(settings).length > 0 ? JSON.stringify(settings) : undefined,
+      },
     });
     return res.status(201).json({ ok: true, item: created });
   } catch {
@@ -100,10 +124,30 @@ router.put('/marketplaces/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR']),
   const id = String(req.params.id ?? '');
   const name = req.body?.name !== undefined ? String(req.body.name).trim() : undefined;
   const apiStatus = req.body?.apiStatus !== undefined ? String(req.body.apiStatus).trim() : undefined;
+  const apiKey = req.body?.apiKey !== undefined ? String(req.body.apiKey).trim() : undefined;
+  const apiSecret = req.body?.apiSecret !== undefined ? String(req.body.apiSecret).trim() : undefined;
+  const apiUrl = req.body?.apiUrl !== undefined ? String(req.body.apiUrl).trim() : undefined;
+  const sellerId = req.body?.sellerId !== undefined ? String(req.body.sellerId).trim() : undefined;
 
   if (!id) {
     return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'id zorunludur' } });
   }
+
+  // Mevcut marketplace'i getir
+  const existing = await prisma.marketplace.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Marketplace bulunamadı' } });
+  }
+
+  // Settings'i güncelle
+  let settings: Record<string, string> = {};
+  try {
+    if (existing.settings) settings = JSON.parse(existing.settings);
+  } catch {}
+  
+  if (sellerId !== undefined) settings.sellerId = sellerId;
+  if (apiKey !== undefined) settings.apiKey = apiKey;
+  if (apiSecret !== undefined) settings.apiSecret = apiSecret;
 
   try {
     const updated = await prisma.marketplace.update({
@@ -111,11 +155,35 @@ router.put('/marketplaces/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR']),
       data: {
         ...(name !== undefined ? { name } : {}),
         ...(apiStatus !== undefined ? { apiStatus } : {}),
+        ...(apiKey !== undefined ? { apiKey: apiKey || null } : {}),
+        ...(apiSecret !== undefined ? { apiSecret: apiSecret || null } : {}),
+        ...(apiUrl !== undefined ? { apiUrl: apiUrl || null } : {}),
+        settings: JSON.stringify(settings),
       },
     });
     return res.json({ ok: true, item: updated });
   } catch {
     return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Marketplace bulunamadı' } });
+  }
+});
+
+// Marketplace bağlantı testi - gerçek API'ye istek atar
+router.post('/marketplaces/:id/test', requireAuth, async (req, res) => {
+  const id = String(req.params.id ?? '');
+  if (!id) {
+    return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'id zorunludur' } });
+  }
+
+  try {
+    const { testMarketplaceConnection } = await import('../services/marketplaceApi.ts');
+    const result = await testMarketplaceConnection(id);
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ 
+      ok: false, 
+      message: '❌ Bağlantı testi başarısız',
+      error: error instanceof Error ? error.message : 'Bilinmeyen hata'
+    });
   }
 });
 

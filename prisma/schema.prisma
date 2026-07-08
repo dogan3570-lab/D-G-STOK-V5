@@ -34,6 +34,7 @@ model Marketplace {
   orders                 Order[]
   messages               Message[]
   templates              ListingTemplate[]
+  financeRecords         FinanceRecord[]
 }
 
 model Product {
@@ -184,7 +185,10 @@ model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?
   action      String
+  entity      String?
+  entityId    String?
   meta        String?
+  details     String?
   ipAddress   String?
   duration    Int?
   success     Boolean  @default(true)
@@ -249,11 +253,14 @@ model Order {
   items         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  shipments     Shipment[]
+  financeRecords FinanceRecord[]
 }
 
 model Shipment {
   id            String    @id @default(uuid())
   orderId       String?
+  order         Order?    @relation(fields: [orderId], references: [id])
   channel       String
   cargoCompany  String
   trackingNo    String
@@ -312,17 +319,37 @@ model Setting {
   value String
 }
 
-model FinanceRecord {
+model AutomationRule {
   id            String    @id @default(uuid())
-  type          String    @default("sale")
+  name          String
+  type          String    // "xml_sync", "price_update", "stock_update", "order_sync", "cargo_sync", "notification"
+  triggerType   String    // "schedule", "webhook", "cron", "event"
+  triggerConfig String?   // JSON: schedule interval, cron expression, webhook URL etc.
+  actionType    String    // "sync_xml", "update_price", "update_stock", "sync_order", "send_notification"
+  actionConfig  String?   // JSON: action-specific configuration
+  active        Boolean   @default(true)
+  schedule      String?   // Cron expression or interval string
+  marketplaceId String?
+  lastRunAt     DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model FinanceRecord {
+  id            String      @id @default(uuid())
+  type          String      @default("sale")
   amount        Float
   commission    Float?
   vat           Float?
   profit        Float?
   productId     String?
   marketplaceId String?
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id])
   orderId       String?
+  order         Order?      @relation(fields: [orderId], references: [id])
   description   String?
-  date          DateTime  @default(now())
-  createdAt     DateTime  @default(now())
+  date          DateTime    @default(now())
+  createdAt     DateTime    @default(now())
 }

@@ -23,11 +23,11 @@ const MENU_ITEMS: MenuItem[] = [
   { key: 'xml', label: 'Ürün Kaynakları', icon: '🔗', active: true, group: 'ENTEGRASYONLAR' },
   { key: 'kategori', label: 'Kategori Eşleştir', icon: '🗂', group: 'ENTEGRASYONLAR' },
   { key: 'marka', label: 'Marka Eşleştir', icon: '🏷', group: 'ENTEGRASYONLAR' },
-  { key: 'varyant', label: 'Varyant Eşleştir', icon: '🎨', group: 'ENTEGRASYONLAR' },
-  { key: 'sablon', label: 'Listeleme Şablonu', icon: '📋', group: 'LİSTELEME' },
+
   { key: 'pazaryeri', label: 'Pazaryeri Paneli', icon: '🛒', group: 'PAZARYERİ' },
   { key: 'urunler', label: 'Ürün Havuzu', icon: '📦', group: 'ÜRÜNLER' },
   { key: 'gonderim', label: 'Gönderim Merkezi', icon: '🚀', group: 'EK KANALLAR & ARAÇLAR' },
+  { key: 'otomasyon', label: 'Otomasyon', icon: '⚡', group: 'EK KANALLAR & ARAÇLAR' },
   { key: 'rapor', label: 'Raporlar', icon: '📊', group: 'RAPORLAR' },
   { key: 'users', label: 'Kullanıcılar', icon: '👥', group: 'YÖNETİM' },
   { key: 'ayar', label: 'Ayarlar', icon: '⚙', group: 'YÖNETİM' },

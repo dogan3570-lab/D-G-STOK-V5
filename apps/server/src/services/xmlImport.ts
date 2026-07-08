@@ -358,6 +358,8 @@ export async function importXmlProducts(xml: string, options?: { actorUserId?: s
           brandMatch: brandResult.matched,
           variantMatch: hasVariants,
           status: 'XML',
+          // XML kaynağına bağla - ürünler kalıcı olarak saklansın
+          xmlSourceId: sourceRecord?.id || null,
         },
       });
 
@@ -396,6 +398,8 @@ export async function importXmlProducts(xml: string, options?: { actorUserId?: s
         brandMatch: brandResult.matched,
         variantMatch: hasVariants,
         status: 'XML',
+        // XML kaynağına bağla - ürünler kalıcı olarak saklansın
+        xmlSourceId: sourceRecord?.id || null,
       },
     });
 

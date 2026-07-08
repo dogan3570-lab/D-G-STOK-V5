@@ -14,6 +14,7 @@ import { attachRoutes } from './routes/index.ts';
 import { startWorkers } from './workers/index.ts';
 import { ensureDefaultAdminUser } from './bootstrap.ts';
 import { ensureDatabaseReady } from './db/ensureDb.ts';
+import { startScheduler } from './services/automationScheduler.ts';
 
 export function buildServer() {
   const app = express();
@@ -131,6 +132,12 @@ if (process.env.NODE_ENV !== 'test') {
       // eslint-disable-next-line no-console
       console.log('[server] database ready');
       await ensureDefaultAdminUser();
+      
+      // Otomasyon scheduler'ını başlat (her 30 saniyede bir kontrol)
+      const schedulerEnabled = String(process.env.ENABLE_SCHEDULER ?? 'true').toLowerCase() === 'true';
+      if (schedulerEnabled) {
+        startScheduler(30);
+      }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('[server] database bootstrap failed', error);

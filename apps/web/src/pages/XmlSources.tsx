@@ -131,7 +131,7 @@ const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000];
 // ==================== COMPONENT ====================
 export default function XmlSources() {
   // Tab state
-  const [activeTab, setActiveTab] = useState<'kaynaklar' | 'urunler' | 'esleme' | 'fiyat'>('kaynaklar');
+  const [activeTab, setActiveTab] = useState<'kaynaklar' | 'urunler'>('kaynaklar');
   
   // Sources state
   const [sources, setSources] = useState<XmlSourceItem[]>([]);
@@ -194,16 +194,16 @@ export default function XmlSources() {
   }, [selectedSourceId, productPagination.page, productSearch, pageSize]);
 
   useEffect(() => {
-    if (selectedSourceId && activeTab === 'esleme') {
+    if (selectedSourceId) {
       fetchXmlFields();
     }
-  }, [selectedSourceId, activeTab]);
+  }, [selectedSourceId]);
 
   useEffect(() => {
-    if (selectedSourceId && activeTab === 'fiyat') {
+    if (selectedSourceId) {
       loadPricingRules();
     }
-  }, [selectedSourceId, activeTab]);
+  }, [selectedSourceId]);
 
   // ==================== API CALLS ====================
   async function fetchSources() {
@@ -543,8 +543,6 @@ export default function XmlSources() {
         {[
           { key: 'kaynaklar', label: '🔗 Tedarikçiler', desc: 'XML kaynak yönetimi' },
           { key: 'urunler', label: '📦 Ürünler', desc: 'Ürün listesi ve detay' },
-          { key: 'esleme', label: '🔗 Alan Eşleştirme', desc: 'XML alanlarını eşleştir' },
-          { key: 'fiyat', label: '💰 Fiyatlandırma', desc: 'Fiyatlandırma motoru' },
         ].map(tab => (
           <button
             key={tab.key}
@@ -614,8 +612,8 @@ export default function XmlSources() {
                           <button type="button" onClick={() => fetchHistory(source.id)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Geçmiş">📜</button>
                           <button type="button" onClick={() => handleTestConnection(source.id)} disabled={testingIds[source.id]} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50" title="Bağlantı Testi">{testingIds[source.id] ? '⏳' : '🔌'}</button>
                           <button type="button" onClick={() => handleSync(source.id)} disabled={syncingIds[source.id]} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50" title="Sync">{syncingIds[source.id] ? '⏳' : '🔄'}</button>
-                          <button type="button" onClick={() => { setSelectedSourceId(source.id); setActiveTab('esleme'); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Alan Eşleştirme">🔗</button>
-                          <button type="button" onClick={() => { setSelectedSourceId(source.id); setActiveTab('fiyat'); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Fiyatlandırma">💰</button>
+                          <button type="button" onClick={() => { setSelectedSourceId(source.id); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Alan Eşleştirme">🔗</button>
+                          <button type="button" onClick={() => { setSelectedSourceId(source.id); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Fiyatlandırma">💰</button>
                           <button type="button" onClick={() => openEditModal(source)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Düzenle">✏️</button>
                           <button type="button" onClick={() => handleDelete(source.id)} className="rounded-lg p-2 text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors" title="Sil">🗑️</button>
                         </div>
@@ -802,308 +800,7 @@ export default function XmlSources() {
         </>
       )}
 
-      {/* ==================== ALAN EŞLEŞTİRME TAB ==================== */}
-      {activeTab === 'esleme' && (
-        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
-          {!selectedSourceId ? (
-            <div className="flex flex-col items-center justify-center p-8 text-slate-400">
-              <div className="text-4xl mb-2">🔗</div>
-              <div>Lütfen bir tedarikçi seçin</div>
-            </div>
-          ) : fieldsLoading ? (
-            <div className="flex items-center justify-center p-8 text-slate-400">XML alanları analiz ediliyor...</div>
-          ) : xmlFields.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-8 text-slate-400">
-              <div className="text-4xl mb-2">🔗</div>
-              <div>XML alanları bulunamadı. Önce XML kaynağını test edin veya senkronize edin.</div>
-            </div>
-          ) : (
-            <>
-              <div className="mb-4">
-                <h3 className="text-base font-semibold text-white">XML Alan Eşleştirme</h3>
-                <p className="text-sm text-slate-400">XML'deki alanları sistem alanlarıyla eşleştirin</p>
-              </div>
-
-              {/* Tedarikçi Seçimi */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-slate-300 mb-2">Tedarikçi</label>
-                <select
-                  value={selectedSourceId || ''}
-                  onChange={(e) => setSelectedSourceId(e.target.value || null)}
-                  className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                >
-                  {sources.map((source) => (
-                    <option key={source.id} value={source.id}>{source.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Alan Eşleştirme Tablosu */}
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-700/50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">XML Alanı</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Sistem Alanı</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Örnek Değer</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700">
-                    {xmlFields.map((field) => (
-                      <tr key={field} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors">
-                        <td className="px-4 py-3">
-                          <code className="rounded bg-slate-700 px-2 py-1 text-sm text-blue-300 font-mono">{field}</code>
-                        </td>
-                        <td className="px-4 py-3">
-                          <select
-                            value={fieldMapping[field] || ''}
-                            onChange={(e) => setFieldMapping({ ...fieldMapping, [field]: e.target.value })}
-                            className="w-full max-w-xs rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                          >
-                            <option value="">-- Eşleştirme Yok --</option>
-                            {SYSTEM_FIELDS.map((sf) => (
-                              <option key={sf.value} value={sf.value}>{sf.label}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-400">-</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Alış Fiyatı Alanı */}
-              <div className="mt-6 rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                <label className="block text-sm font-medium text-slate-300 mb-2">Alış Fiyatı Alanı</label>
-                <p className="text-xs text-slate-400 mb-3">XML'deki hangi alan alış fiyatı olarak kullanılacak?</p>
-                <select
-                  value={purchasePriceField}
-                  onChange={(e) => setPurchasePriceField(e.target.value)}
-                  className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="">-- Seçiniz --</option>
-                  {xmlFields.map((field) => (
-                    <option key={field} value={field}>{field}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Kaydet Butonu */}
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSaveMapping}
-                  className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-                >
-                  💾 Alan Eşleştirmeyi Kaydet
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== FİYATLANDIRMA TAB ==================== */}
-      {activeTab === 'fiyat' && (
-        <div className="space-y-6">
-          {/* Tedarikçi Seçimi */}
-          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 backdrop-blur-sm">
-            <label className="block text-sm font-medium text-slate-300 mb-2">Tedarikçi</label>
-            <select
-              value={selectedSourceId || ''}
-              onChange={(e) => setSelectedSourceId(e.target.value || null)}
-              className="w-full max-w-md rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-            >
-              {sources.map((source) => (
-                <option key={source.id} value={source.id}>{source.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* KDV Ayarları */}
-          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
-            <h3 className="text-base font-semibold text-white mb-4">KDV Yönetimi</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">KDV Durumu</label>
-                <select
-                  value={pricingVatStatus}
-                  onChange={(e) => setPricingVatStatus(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="dahil">KDV Dahil</option>
-                  <option value="haric">KDV Hariç</option>
-                  <option value="ekleme">KDV Ekleme</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">KDV Oranı (%)</label>
-                <input
-                  type="number"
-                  value={pricingVatRate}
-                  onChange={(e) => setPricingVatRate(Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                  min="0"
-                  max="100"
-                  step="1"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Fiyatlandırma Kuralları */}
-          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-white">Fiyatlandırma Motoru</h3>
-              <button
-                type="button"
-                onClick={addPricingRule}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-              >
-                + Kural Ekle
-              </button>
-            </div>
-            <p className="text-sm text-slate-400 mb-4">
-              Alış fiyatına uygulanacak kuralları sırayla tanımlayın. Kurallar yukarıdan aşağıya uygulanır.
-            </p>
-
-            {pricingRules.length === 0 ? (
-              <div className="flex flex-col items-center justify-center p-8 text-slate-400">
-                <div className="text-4xl mb-2">💰</div>
-                <div>Henüz fiyatlandırma kuralı yok</div>
-                <button type="button" onClick={addPricingRule} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
-                  + İlk Kuralı Ekle
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {pricingRules.map((rule, index) => (
-                  <div key={rule.id} className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600/20 text-sm font-bold text-blue-400">
-                      {index + 1}
-                    </div>
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-1">Kural Tipi</label>
-                        <select
-                          value={rule.type}
-                          onChange={(e) => updatePricingRule(rule.id, { type: e.target.value, label: PRICING_RULE_TYPES.find(t => t.value === e.target.value)?.label || e.target.value })}
-                          className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                        >
-                          {PRICING_RULE_TYPES.map((type) => (
-                            <option key={type.value} value={type.value}>{type.icon} {type.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-1">Değer</label>
-                        <input
-                          type="number"
-                          value={rule.value}
-                          onChange={(e) => updatePricingRule(rule.id, { value: Number(e.target.value) })}
-                          className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                          step="0.01"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-1">Etiket (opsiyonel)</label>
-                        <input
-                          type="text"
-                          value={rule.label}
-                          onChange={(e) => updatePricingRule(rule.id, { label: e.target.value })}
-                          className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                          placeholder="Kâr Ekle, İndirim..."
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removePricingRule(rule.id)}
-                      className="rounded-lg p-2 text-red-400 hover:bg-red-500/20 transition-colors"
-                      title="Kuralı Sil"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Fiyat Önizleme */}
-          <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
-            <h3 className="text-base font-semibold text-white mb-4">Fiyat Hesaplama Önizleme</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Alış Fiyatı (Test)</label>
-                <input
-                  type="number"
-                  value={previewPrice}
-                  onChange={(e) => setPreviewPrice(Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
-                  step="0.01"
-                  min="0"
-                />
-              </div>
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={handlePreviewPricing}
-                  disabled={previewLoading}
-                  className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                >
-                  {previewLoading ? '⏳ Hesaplanıyor...' : '🔮 Hesapla'}
-                </button>
-              </div>
-            </div>
-
-            {pricingPreview && (
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div>
-                    <div className="text-xs text-slate-400">Alış Fiyatı</div>
-                    <div className="text-lg font-semibold text-white">{formatPrice(pricingPreview.basePrice)}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-400">Hesaplanan Satış Fiyatı</div>
-                    <div className="text-lg font-semibold text-green-400">{formatPrice(pricingPreview.calculatedPrice)}</div>
-                  </div>
-                </div>
-
-                {pricingPreview.steps.length > 0 && (
-                  <div>
-                    <div className="text-xs text-slate-400 mb-2">Hesaplama Adımları:</div>
-                    <div className="space-y-1">
-                      {pricingPreview.steps.map((step) => (
-                        <div key={step.step} className="flex items-center justify-between rounded bg-slate-700/50 px-3 py-1.5 text-sm">
-                          <span className="text-slate-300">
-                            <span className="text-blue-400 font-medium">#{step.step}</span> {step.rule}
-                          </span>
-                          <span className="text-slate-400">
-                            {formatPrice(step.before)} → <span className="text-white font-medium">{formatPrice(step.after)}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Kaydet Butonu */}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={handleSavePricing}
-              className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-            >
-              💾 Fiyatlandırma Kurallarını Kaydet
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ==================== ALAN EŞLEŞTİRME VE FİYATLANDIRMA KALDIRILDI ==================== */}
 
       {/* ==================== MODALS ==================== */}
 

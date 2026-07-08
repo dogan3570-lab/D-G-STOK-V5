@@ -8,6 +8,9 @@ import Marketplace from './pages/Marketplace';
 import Login from './pages/Login';
 import Orders from './pages/Orders';
 import Brands from './pages/Brands';
+import Categories from './pages/Categories';
+import Variants from './pages/Variants';
+import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import Finance from './pages/Finance';
@@ -16,6 +19,7 @@ import Shipments from './pages/Shipments';
 import Templates from './pages/Templates';
 import Users from './pages/Users';
 import AuditLogs from './pages/AuditLogs';
+import Automation from './pages/Automation';
 import { useTheme } from './hooks/useTheme';
 import './styles/theme.css';
 import type {
@@ -81,15 +85,13 @@ async function safeFetchJson(url: string): Promise<unknown> {
   }
 }
 
-type PageKey = 'kontrol' | 'xml' | 'urunler' | 'kategori' | 'varyant' | 'marka' | 'sablon' | 'pazaryeri' | 'gonderim' | 'siparis' | 'rapor' | 'ayar' | 'loglar';
+type PageKey = 'kontrol' | 'xml' | 'urunler' | 'kategori' | 'marka' | 'pazaryeri' | 'gonderim' | 'siparis' | 'rapor' | 'ayar' | 'loglar';
 const MENU_ITEMS: Array<{ key: PageKey; label: string; icon: string }> = [
   { key: 'kontrol', label: 'Kontrol Paneli', icon: '🏠' },
   { key: 'xml', label: 'XML Kaynakları', icon: '🔗' },
   { key: 'urunler', label: 'Ürünler', icon: '📦' },
   { key: 'kategori', label: 'Kategori Eşleştir', icon: '🗂' },
-  { key: 'varyant', label: 'Varyant Eşleştir', icon: '🎨' },
   { key: 'marka', label: 'Marka Eşleştir', icon: '🏷' },
-  { key: 'sablon', label: 'Listeleme Şablonları', icon: '📋' },
   { key: 'pazaryeri', label: 'Pazaryerleri', icon: '🛒' },
   { key: 'gonderim', label: 'Gönderim Merkezi', icon: '🚀' },
   { key: 'siparis', label: 'Siparişler', icon: '📑' },
@@ -108,7 +110,10 @@ export default function App() {
 
 function AppContent() {
   const { theme, toggleTheme } = useTheme();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    // Sayfa yenilenince oturumu koru
+    return localStorage.getItem('dgstok_loggedin') === 'true';
+  });
   const [activePage, setActivePage] = useState('kontrol');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [health, setHealth] = useState<HealthPayload | null>(null);
@@ -137,9 +142,7 @@ function AppContent() {
       xml: 'XML Kaynakları',
       urunler: 'Ürünler',
       kategori: 'Kategori Eşleştirme',
-      varyant: 'Varyant Eşleştirme',
       marka: 'Marka Eşleştirme',
-      sablon: 'Listeleme Şablonları',
       pazaryeri: 'Pazaryerleri',
       gonderim: 'Gönderim Merkezi',
       siparis: 'Siparişler',
@@ -159,29 +162,10 @@ function AppContent() {
       case 'urunler':
         return <Products />;
       case 'kategori':
-        return (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="text-4xl mb-4">🗂</div>
-              <div className="text-lg font-semibold text-white">Kategori Eşleştirme</div>
-              <div className="text-sm text-slate-400 mt-2">Kategori eşleştirme sayfası yakında eklenecek.</div>
-            </div>
-          </div>
-        );
-      case 'varyant':
-        return (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="text-4xl mb-4">🎨</div>
-              <div className="text-lg font-semibold text-white">Varyant Eşleştirme</div>
-              <div className="text-sm text-slate-400 mt-2">Varyant eşleştirme sayfası yakında eklenecek.</div>
-            </div>
-          </div>
-        );
+        return <Categories />;
       case 'marka':
         return <Brands />;
-      case 'sablon':
-        return <Templates />;
+
       case 'pazaryeri':
         return <Marketplace />;
       case 'gonderim':
@@ -189,19 +173,13 @@ function AppContent() {
       case 'siparis':
         return <Orders />;
       case 'rapor':
-        return (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="text-4xl mb-4">📊</div>
-              <div className="text-lg font-semibold text-white">Raporlar</div>
-              <div className="text-sm text-slate-400 mt-2">Raporlar sayfası yakında eklenecek.</div>
-            </div>
-          </div>
-        );
+        return <Reports />;
       case 'ayar':
         return <Settings />;
       case 'loglar':
         return <AuditLogs />;
+      case 'otomasyon':
+        return <Automation />;
       default:
         return <Dashboard />;
     }
