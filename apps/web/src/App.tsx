@@ -5,6 +5,17 @@ import Dashboard from './pages/Dashboard';
 import XmlSources from './pages/XmlSources';
 import Products from './pages/Products';
 import Marketplace from './pages/Marketplace';
+import Login from './pages/Login';
+import Orders from './pages/Orders';
+import Brands from './pages/Brands';
+import Settings from './pages/Settings';
+import Notifications from './pages/Notifications';
+import Finance from './pages/Finance';
+import Messages from './pages/Messages';
+import Shipments from './pages/Shipments';
+import Templates from './pages/Templates';
+import Users from './pages/Users';
+import AuditLogs from './pages/AuditLogs';
 import { useTheme } from './hooks/useTheme';
 import './styles/theme.css';
 import type {
@@ -97,7 +108,8 @@ export default function App() {
 
 function AppContent() {
   const { theme, toggleTheme } = useTheme();
-  const [activePage, setActivePage] = useState('dashboard');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [activePage, setActivePage] = useState('kontrol');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
@@ -121,46 +133,83 @@ function AppContent() {
 
   const getPageTitle = () => {
     const titles: Record<string, string> = {
-      dashboard: 'Yönetici Paneli',
-      'xml-sources': 'Ürün Kaynakları',
-      products: 'Ürün Havuzu',
-      'category-match': 'Kategori Eşleştirme',
-      'brand-match': 'Marka Eşleştirme',
-      'variant-match': 'Varyant Eşleştirme',
-      templates: 'Listeleme Şablonları',
-      marketplace: 'Pazaryeri Paneli',
-      shipments: 'Gönderim Merkezi',
-      orders: 'Siparişler',
-      reports: 'Raporlar',
-      users: 'Kullanıcılar',
-      settings: 'Ayarlar',
-      support: 'Destek',
+      kontrol: 'Kontrol Paneli',
+      xml: 'XML Kaynakları',
+      urunler: 'Ürünler',
+      kategori: 'Kategori Eşleştirme',
+      varyant: 'Varyant Eşleştirme',
+      marka: 'Marka Eşleştirme',
+      sablon: 'Listeleme Şablonları',
+      pazaryeri: 'Pazaryerleri',
+      gonderim: 'Gönderim Merkezi',
+      siparis: 'Siparişler',
+      rapor: 'Raporlar',
+      ayar: 'Ayarlar',
+      loglar: 'Loglar',
     };
-    return titles[activePage] || 'Dashboard';
+    return titles[activePage] || 'Kontrol Paneli';
   };
 
   const renderPage = () => {
     switch (activePage) {
-      case 'dashboard':
+      case 'kontrol':
         return <Dashboard />;
-      case 'xml-sources':
+      case 'xml':
         return <XmlSources />;
-      case 'products':
+      case 'urunler':
         return <Products />;
-      case 'marketplace':
-        return <Marketplace />;
-      default:
+      case 'kategori':
         return (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <div className="text-4xl mb-4">🚧</div>
-              <div className="text-lg font-semibold text-white">Sayfa Yapım Aşamasında</div>
-              <div className="text-sm text-slate-400 mt-2">{getPageTitle()} sayfası yakında eklenecek.</div>
+              <div className="text-4xl mb-4">🗂</div>
+              <div className="text-lg font-semibold text-white">Kategori Eşleştirme</div>
+              <div className="text-sm text-slate-400 mt-2">Kategori eşleştirme sayfası yakında eklenecek.</div>
             </div>
           </div>
         );
+      case 'varyant':
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="text-4xl mb-4">🎨</div>
+              <div className="text-lg font-semibold text-white">Varyant Eşleştirme</div>
+              <div className="text-sm text-slate-400 mt-2">Varyant eşleştirme sayfası yakında eklenecek.</div>
+            </div>
+          </div>
+        );
+      case 'marka':
+        return <Brands />;
+      case 'sablon':
+        return <Templates />;
+      case 'pazaryeri':
+        return <Marketplace />;
+      case 'gonderim':
+        return <Shipments />;
+      case 'siparis':
+        return <Orders />;
+      case 'rapor':
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="text-4xl mb-4">📊</div>
+              <div className="text-lg font-semibold text-white">Raporlar</div>
+              <div className="text-sm text-slate-400 mt-2">Raporlar sayfası yakında eklenecek.</div>
+            </div>
+          </div>
+        );
+      case 'ayar':
+        return <Settings />;
+      case 'loglar':
+        return <AuditLogs />;
+      default:
+        return <Dashboard />;
     }
   };
+
+  if (!isLoggedIn) {
+    return <Login onLoginSuccess={() => setIsLoggedIn(true)} />;
+  }
 
   return (
     <div className="flex h-screen bg-slate-900 dark">
@@ -168,7 +217,7 @@ function AppContent() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header
           title={getPageTitle()}
-          subtitle="D&G STOK V5.0 ERP Entegrasyon Sistemi"
+          subtitle="DG STOK V5.0 ERP Entegrasyon Sistemi"
           onRefresh={() => window.location.reload()}
           notifications={2}
         />

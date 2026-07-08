@@ -16,22 +16,22 @@ interface SidebarProps {
 }
 
 const MENU_ITEMS: MenuItem[] = [
-  { key: 'dashboard', label: 'Yönetici Paneli', icon: '🏠', badge: 2, group: 'YÖNETİCİ' },
-  { key: 'orders', label: 'Siparişler', icon: '📦', group: 'SİPARİŞLER' },
+  { key: 'kontrol', label: 'Kontrol Paneli', icon: '🏠', badge: 2, group: 'YÖNETİCİ' },
+  { key: 'siparis', label: 'Siparişler', icon: '📦', group: 'SİPARİŞLER' },
   { key: 'messages', label: 'Mesajlar', icon: '💬', group: 'SİPARİŞLER' },
   { key: 'finance', label: 'Finans', icon: '💰', group: 'SİPARİŞLER' },
-  { key: 'xml-sources', label: 'Ürün Kaynakları', icon: '🔗', active: true, group: 'ENTEGRASYONLAR' },
-  { key: 'category-match', label: 'Kategori Eşleştir', icon: '🗂', group: 'ENTEGRASYONLAR' },
-  { key: 'brand-match', label: 'Marka Eşleştir', icon: '🏷', group: 'ENTEGRASYONLAR' },
-  { key: 'variant-match', label: 'Varyant Eşleştir', icon: '🎨', group: 'ENTEGRASYONLAR' },
-  { key: 'templates', label: 'Listeleme Şablonu', icon: '📋', group: 'LİSTELEME' },
-  { key: 'marketplace', label: 'Pazaryeri Paneli', icon: '🛒', group: 'PAZARYERİ' },
-  { key: 'products', label: 'Ürün Havuzu', icon: '📦', group: 'ÜRÜNLER' },
-  { key: 'shipments', label: 'Gönderim Merkezi', icon: '🚀', group: 'EK KANALLAR & ARAÇLAR' },
-  { key: 'reports', label: 'Raporlar', icon: '📊', group: 'RAPORLAR' },
+  { key: 'xml', label: 'Ürün Kaynakları', icon: '🔗', active: true, group: 'ENTEGRASYONLAR' },
+  { key: 'kategori', label: 'Kategori Eşleştir', icon: '🗂', group: 'ENTEGRASYONLAR' },
+  { key: 'marka', label: 'Marka Eşleştir', icon: '🏷', group: 'ENTEGRASYONLAR' },
+  { key: 'varyant', label: 'Varyant Eşleştir', icon: '🎨', group: 'ENTEGRASYONLAR' },
+  { key: 'sablon', label: 'Listeleme Şablonu', icon: '📋', group: 'LİSTELEME' },
+  { key: 'pazaryeri', label: 'Pazaryeri Paneli', icon: '🛒', group: 'PAZARYERİ' },
+  { key: 'urunler', label: 'Ürün Havuzu', icon: '📦', group: 'ÜRÜNLER' },
+  { key: 'gonderim', label: 'Gönderim Merkezi', icon: '🚀', group: 'EK KANALLAR & ARAÇLAR' },
+  { key: 'rapor', label: 'Raporlar', icon: '📊', group: 'RAPORLAR' },
   { key: 'users', label: 'Kullanıcılar', icon: '👥', group: 'YÖNETİM' },
-  { key: 'settings', label: 'Ayarlar', icon: '⚙', group: 'YÖNETİM' },
-  { key: 'support', label: 'Destek', icon: '❓', group: 'YÖNETİM' },
+  { key: 'ayar', label: 'Ayarlar', icon: '⚙', group: 'YÖNETİM' },
+  { key: 'loglar', label: 'Loglar', icon: '📝', group: 'YÖNETİM' },
 ];
 
 export default function Sidebar({ activePage, onPageChange, collapsed = false }: SidebarProps) {
@@ -49,8 +49,8 @@ export default function Sidebar({ activePage, onPageChange, collapsed = false }:
       <div className="flex items-center justify-between border-b border-slate-700 p-4">
         {!collapsed && (
           <div>
-            <div className="text-sm font-bold uppercase tracking-wider text-blue-400">STOCKMOUNT</div>
-            <div className="text-xs text-slate-400">ERP ENTEGRASYON</div>
+            <div className="text-sm font-bold uppercase tracking-wider text-blue-400">DG STOK V5.0</div>
+            <div className="text-xs text-slate-400">XML ENTEGRATÖR + ERP</div>
           </div>
         )}
         <button

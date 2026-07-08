@@ -1,0 +1,1 @@
+SLACK_WEBHOOK_URL=  src\common\filters src\common\interceptors src\common\guards src\common\decorators src\common\dto src\logging src\modules\auth src\modules\users src\modules\products src\modules\categories src\modules\inventory src\modules\orders src\modules\marketplaces src\modules\suppliers src\modules\notifications src\modules\health src\modules\self-healing

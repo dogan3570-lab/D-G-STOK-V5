@@ -12,26 +12,43 @@ model User {
   email     String    @unique
   password  String
   role      String    @default("OPERATOR")
+  name      String?
   createdAt DateTime  @default(now())
   auditLogs AuditLog[]
+  preferences String? // JSON: kullanıcı tercihleri (sayfa başına göster, sütun ayarları vb.)
 }
 
 model Marketplace {
   id                     String                  @id @default(uuid())
   key                    String                  @unique
   name                   String
+  apiKey                 String?
+  apiSecret              String?
+  apiUrl                 String?
   apiStatus              String                  @default("unknown")
+  active                 Boolean                 @default(true)
+  settings               String?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   productMarketplaceStates ProductMarketplaceState[]
+  orders                 Order[]
+  messages               Message[]
+  templates              ListingTemplate[]
 }
 
 model Product {
   id                     String                  @id @default(uuid())
   xmlKey                 String                  @unique
   title                  String?
+  seoTitle               String?
+  seoDescription         String?
+  description            String?
+  technicalSpecs         String?
+  images                 String?
+  videos                 String?
   sku                    String?
   barcode                String?
+  stockCode              String?
   categoryId             String?
   category               Category?               @relation(fields: [categoryId], references: [id])
   brandId                String?
@@ -42,12 +59,26 @@ model Product {
   templateMatch          Boolean                 @default(false)
   stock                  Int                     @default(0)
   minStock               Int                     @default(0)
+  purchasePrice          Float?
+  salePrice              Float?
+  vatRate                Float?
+  commissionRate         Float?
+  profitMargin           Float?
+  minProfit              Float?
+  discount               Float?
   status                 String                  @default("XML")
   errorMessage           String?
+  tags                   String?
+  xmlSourceId            String?
+  link                   String?                 // Ürün linki
+  unit                   String?                 // Birim (Adet, kg vb.)
+  currency               String?                 // Para birimi
+  detail                 String?                 // Detaylı açıklama
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   marketplaceStates      ProductMarketplaceState[]
   variants               Variant[]
+  xmlSource              XmlSource?              @relation(fields: [xmlSourceId], references: [id])
 }
 
 model ProductMarketplaceState {
@@ -55,8 +86,13 @@ model ProductMarketplaceState {
   productId      String
   marketplaceId  String
   status         String        @default("XML")
+  listingId      String?
+  listingUrl     String?
   lastActionAt   DateTime?
   externalRef    String?
+  price          Float?
+  stock          Int?
+  errorMessage   String?
 
   product       Product       @relation(fields: [productId], references: [id])
   marketplace   Marketplace   @relation(fields: [marketplaceId], references: [id])
@@ -79,16 +115,40 @@ model QueueJob {
 model XmlSource {
   id                      String           @id @default(uuid())
   name                    String
+  company                 String?
   sourceType              String           @default("MANUAL")
   url                     String?
+  username                String?
+  password                String?
+  currency                String           @default("TRY")
+  vatRate                 Float            @default(20)
+  updateStock             Boolean          @default(true)
+  updatePrice             Boolean          @default(true)
+  updateImages            Boolean          @default(true)
   active                  Boolean          @default(true)
   scheduleIntervalMinutes Int              @default(60)
+  cronExpression          String?
   lastRunAt               DateTime?
   lastSuccessAt           DateTime?
   lastError               String?
+  connectionStatus        String           @default("unknown") // "connected", "error", "auth_error", "timeout", "unknown"
+  
+  // KDV Yönetimi
+  purchasePriceVatStatus  String           @default("dahil") // "dahil", "haric", "ekleme"
+  
+  // Fiyatlandırma Motoru Ayarları (JSON)
+  pricingRules            String?          // JSON: fiyatlandırma kuralları dizisi
+  
+  // XML Alan Eşleştirme (JSON)
+  fieldMapping            String?          // JSON: { "xml_field": "system_field", ... }
+  
+  // Alış fiyatı alanı seçimi
+  purchasePriceField      String?          // XML'deki hangi alanın alış fiyatı olarak kullanılacağı
+  
   createdAt               DateTime         @default(now())
   updatedAt               DateTime         @updatedAt
   importRuns              XmlImportRun[]
+  products                Product[]
 }
 
 model XmlImportRun {
@@ -103,6 +163,7 @@ model XmlImportRun {
   updatedProducts     Int                    @default(0)
   failedProducts      Int                    @default(0)
   skippedProducts     Int                    @default(0)
+  deletedProducts     Int                    @default(0)
   errorDetail         String?
   source              XmlSource              @relation(fields: [sourceId], references: [id])
   itemResults         XmlImportItemResult[]
@@ -123,7 +184,10 @@ model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?
   action      String
-  meta         String?
+  meta        String?
+  ipAddress   String?
+  duration    Int?
+  success     Boolean  @default(true)
   createdAt   DateTime @default(now())
 
   actorUser   User? @relation(fields: [actorUserId], references: [id])
@@ -163,14 +227,28 @@ model Variant {
 }
 
 model Order {
-  id          String    @id @default(uuid())
-  orderNo     String    @unique
-  channel     String
-  customerName String
-  status      String    @default("new")
-  total       Float
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(uuid())
+  orderNo       String    @unique
+  channel       String
+  marketplaceId String?
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id])
+  customerName  String
+  customerEmail String?
+  customerPhone String?
+  address       String?
+  city          String?
+  district      String?
+  cargoCompany  String?
+  trackingNo    String?
+  status        String    @default("new")
+  total         Float
+  cargoPrice    Float?
+  commission    Float?
+  vat           Float?
+  notes         String?
+  items         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model Shipment {
@@ -182,4 +260,69 @@ model Shipment {
   status        String    @default("queued")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+}
+
+model Message {
+  id            String    @id @default(uuid())
+  marketplaceId String?
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id])
+  customerName  String
+  customerEmail String?
+  subject       String
+  message       String
+  aiSuggestion  String?
+  status        String    @default("unread")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Notification {
+  id          String    @id @default(uuid())
+  type        String
+  title       String
+  message     String
+  read        Boolean   @default(false)
+  userId      String?
+  createdAt   DateTime  @default(now())
+}
+
+model ListingTemplate {
+  id            String    @id @default(uuid())
+  name          String
+  marketplaceId String?
+  marketplace   Marketplace? @relation(fields: [marketplaceId], references: [id])
+  titleFormat   String?
+  description   String?
+  priceFormula  String?
+  commissionRate Float?
+  vatRate       Float?
+  cargoSettings String?
+  imageSettings String?
+  categoryId    String?
+  brandId       String?
+  variantSettings String?
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Setting {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+}
+
+model FinanceRecord {
+  id            String    @id @default(uuid())
+  type          String    @default("sale")
+  amount        Float
+  commission    Float?
+  vat           Float?
+  profit        Float?
+  productId     String?
+  marketplaceId String?
+  orderId       String?
+  description   String?
+  date          DateTime  @default(now())
+  createdAt     DateTime  @default(now())
 }

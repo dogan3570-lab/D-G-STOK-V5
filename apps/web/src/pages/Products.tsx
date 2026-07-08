@@ -8,12 +8,25 @@ interface ProductItem {
   barcode: string | null;
   stock: number;
   minStock: number;
+  price: number | null;
+  salePrice: number | null;
+  listPrice: number | null;
+  vatRate: number | null;
+  description: string | null;
+  detail: string | null;
+  images: string | null;
+  link: string | null;
   status: string;
   errorMessage: string | null;
   categoryMatch: boolean;
   brandMatch: boolean;
   variantMatch: boolean;
   templateMatch: boolean;
+  categoryId: string | null;
+  brandId: string | null;
+  category?: { id: string; name: string } | null;
+  brand?: { id: string; name: string } | null;
+  variants?: Array<{ id: string; name: string; value: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +51,8 @@ export default function Products() {
     totalPages: 0,
   });
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const [selectedProduct, setSelectedProduct] = useState<ProductItem | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   useEffect(() => {
     fetchProducts();
@@ -100,6 +115,31 @@ export default function Products() {
     };
     const s = statusMap[status] || { label: status, color: 'bg-slate-500/10 text-slate-400' };
     return <span className={`rounded-full px-2 py-1 text-xs font-medium ${s.color}`}>{s.label}</span>;
+  }
+
+  async function openProductDetail(product: ProductItem) {
+    try {
+      const response = await fetch(`/products/${product.id}`, { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedProduct(data);
+      } else {
+        setSelectedProduct(product);
+      }
+    } catch {
+      setSelectedProduct(product);
+    }
+    setShowDetailModal(true);
+  }
+
+  function getImageList(product: ProductItem): string[] {
+    if (!product.images) return [];
+    return product.images.split(',').filter(img => img.trim().length > 0);
+  }
+
+  function formatPrice(value: number | null | undefined): string {
+    if (value == null) return '-';
+    return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(value);
   }
 
   return (
@@ -208,8 +248,8 @@ export default function Products() {
                 {products.map((product) => {
                   const stockStatus = getStockStatus(product);
                   return (
-                    <tr key={product.id} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors">
-                      <td className="px-4 py-3">
+                    <tr key={product.id} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors cursor-pointer" onClick={() => openProductDetail(product)}>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedProducts.has(product.id)}
@@ -324,6 +364,193 @@ export default function Products() {
           >
             Sonraki →
           </button>
+        </div>
+      )}
+
+      {/* Ürün Detay Modalı */}
+      {showDetailModal && selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowDetailModal(false)}>
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-white">Ürün Detayı</h3>
+              <button
+                type="button"
+                onClick={() => setShowDetailModal(false)}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Sol Taraf - Resimler */}
+              <div>
+                {getImageList(selectedProduct).length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {getImageList(selectedProduct).map((img, idx) => (
+                      <div key={idx} className="aspect-square rounded-lg border border-slate-600 bg-slate-700/50 overflow-hidden">
+                        <img
+                          src={img}
+                          alt={`${selectedProduct.title || 'Ürün'} - ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23334155" width="100" height="100"/><text fill="%2394a3b8" font-size="12" x="50" y="55" text-anchor="middle">Resim</text></svg>';
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="aspect-square rounded-lg border border-slate-600 bg-slate-700/50 flex items-center justify-center">
+                    <div className="text-center text-slate-500">
+                      <div className="text-4xl mb-2">🖼️</div>
+                      <div className="text-sm">Resim Yok</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sağ Taraf - Bilgiler */}
+              <div className="space-y-4">
+                {/* Temel Bilgiler */}
+                <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                  <h4 className="text-sm font-semibold text-slate-300 mb-3">Temel Bilgiler</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Başlık</span>
+                      <span className="text-white font-medium">{selectedProduct.title || '-'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">XML Key</span>
+                      <span className="text-blue-400 font-mono">{selectedProduct.xmlKey}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">SKU</span>
+                      <span className="text-white">{selectedProduct.sku || '-'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Barkod</span>
+                      <span className="text-white">{selectedProduct.barcode || '-'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Durum</span>
+                      <span>{getStatusBadge(selectedProduct.status)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fiyat Bilgileri */}
+                <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                  <h4 className="text-sm font-semibold text-slate-300 mb-3">Fiyat Bilgileri</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Fiyat</span>
+                      <span className="text-green-400 font-medium">{formatPrice(selectedProduct.price)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Satış Fiyatı</span>
+                      <span className="text-green-400 font-medium">{formatPrice(selectedProduct.salePrice)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Liste Fiyatı</span>
+                      <span className="text-slate-300">{formatPrice(selectedProduct.listPrice)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">KDV Oranı</span>
+                      <span className="text-white">{selectedProduct.vatRate != null ? `%${selectedProduct.vatRate}` : '-'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stok Bilgileri */}
+                <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                  <h4 className="text-sm font-semibold text-slate-300 mb-3">Stok Bilgileri</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Stok</span>
+                      <span className="text-white font-medium">{selectedProduct.stock}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Min. Stok</span>
+                      <span className="text-white">{selectedProduct.minStock}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Kategori & Marka */}
+                <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                  <h4 className="text-sm font-semibold text-slate-300 mb-3">Kategori & Marka</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Kategori</span>
+                      <span className="text-white">{selectedProduct.category?.name || (selectedProduct.categoryMatch ? 'Eşleşti' : 'Eşleşmedi')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Marka</span>
+                      <span className="text-white">{selectedProduct.brand?.name || (selectedProduct.brandMatch ? 'Eşleşti' : 'Eşleşmedi')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Varyant</span>
+                      <span className={selectedProduct.variantMatch ? 'text-green-400' : 'text-slate-400'}>
+                        {selectedProduct.variantMatch ? 'Eşleşti' : 'Yok'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Varyantlar */}
+                {selectedProduct.variants && selectedProduct.variants.length > 0 && (
+                  <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                    <h4 className="text-sm font-semibold text-slate-300 mb-3">Varyantlar</h4>
+                    <div className="space-y-1">
+                      {selectedProduct.variants.map((v) => (
+                        <div key={v.id} className="flex items-center gap-2 text-sm">
+                          <span className="text-slate-400">{v.name}:</span>
+                          <span className="text-white font-medium">{v.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Açıklama */}
+                {(selectedProduct.description || selectedProduct.detail) && (
+                  <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                    <h4 className="text-sm font-semibold text-slate-300 mb-3">Açıklama</h4>
+                    <div className="text-sm text-slate-300 whitespace-pre-wrap">
+                      {selectedProduct.description || selectedProduct.detail || '-'}
+                    </div>
+                  </div>
+                )}
+
+                {/* Link */}
+                {selectedProduct.link && (
+                  <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                    <h4 className="text-sm font-semibold text-slate-300 mb-3">Ürün Linki</h4>
+                    <a href={selectedProduct.link} target="_blank" rel="noopener noreferrer"
+                      className="text-sm text-blue-400 hover:text-blue-300 underline break-all">
+                      {selectedProduct.link}
+                    </a>
+                  </div>
+                )}
+
+                {/* Tarihler */}
+                <div className="rounded-lg border border-slate-700 bg-slate-700/30 p-4">
+                  <h4 className="text-sm font-semibold text-slate-300 mb-3">Kayıt Bilgileri</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Oluşturulma</span>
+                      <span className="text-white">{new Date(selectedProduct.createdAt).toLocaleString('tr-TR')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Güncellenme</span>
+                      <span className="text-white">{new Date(selectedProduct.updatedAt).toLocaleString('tr-TR')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

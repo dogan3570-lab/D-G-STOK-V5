@@ -84,6 +84,25 @@ export function buildServer() {
     });
   });
 
+  // Seed admin user (development only)
+  app.post('/debug/seed-admin', async (req, res) => {
+    const existing = await prisma.user.count({ where: { email: 'admin@dgstok.com' } });
+    if (existing > 0) {
+      return res.json({ ok: true, skipped: true, message: 'Admin already exists' });
+    }
+
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    const admin = await prisma.user.create({
+      data: {
+        email: 'admin@dgstok.com',
+        password: hashedPassword,
+        role: 'ADMIN',
+      },
+    });
+
+    return res.json({ ok: true, created: admin });
+  });
+
   attachSseEndpoint(app);
   attachRoutes(app);
 
