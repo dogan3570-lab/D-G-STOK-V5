@@ -33,7 +33,8 @@ export default function ReadyToSend() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const p = new URLSearchParams({ page: String(page), limit: String(pageSize), status: 'READY', categoryMatch: 'true', brandMatch: 'true' });
+      // Status=READY degil, cunku urunler XML statusunde. Kategori+Marka+Varyant eslesmesi tamam olanlar gelir
+      const p = new URLSearchParams({ page: String(page), limit: String(pageSize), categoryMatch: 'true', brandMatch: 'true', variantMatch: 'true' });
       if (selectedXmlId) p.append('xmlSourceId', selectedXmlId);
       const r = await apiFetch<any>(`/products?${p}`);
       if (r.ok && r.data) { setProducts(r.data.items || []); setTotal(r.data.pagination?.total || 0); }
