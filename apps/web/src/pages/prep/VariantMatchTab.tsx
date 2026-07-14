@@ -10,10 +10,10 @@ import { showToast } from '../../components/ui/Toast';
 interface V2Stats {
   totalProducts: number;
   xmlVariant: number;      // AUTO_ACCEPTED
-  autoCreated: number;     // NEEDS_REVIEW + MANUAL_REQUIRED
-  needsReview: number;
-  manualRequired: number;
-  errors: number;
+  autoCreated: number;     // AUTO_SUGGEST + MANUAL_REVIEW
+  autoSuggest: number;     // AUTO_SUGGEST (AI önerisi)
+  manualReview: number;    // MANUAL_REVIEW (manuel inceleme)
+  errors: number;          // ERROR (kullanıcı düzeltmesi gereken)
 }
 
 interface XmlSource {
@@ -26,7 +26,7 @@ interface VariantAnalysisItem {
   productId: string;
   confidence: number;
   source: 'XML_PARENT' | 'AI_MATCH' | 'AUTO_CREATED' | 'MANUAL';
-  status: 'AUTO_ACCEPTED' | 'NEEDS_REVIEW' | 'MANUAL_REQUIRED' | 'ERROR';
+  status: 'AUTO_ACCEPTED' | 'AUTO_SUGGEST' | 'MANUAL_REVIEW' | 'ERROR';
   reason: string | null;
   parentSku: string | null;
   groupId: string | null;
@@ -57,8 +57,9 @@ interface ProblemRow {
   product?: ProductDetail;
 }
 
+// Kullanıcının müdahale edebileceği hatalı ürünler (sadece ERROR)
+const PROBLEM_STATUSES = ['ERROR'] as const;
 const PAGE_SIZE = 50;
-const PROBLEM_STATUSES = ['NEEDS_REVIEW', 'MANUAL_REQUIRED', 'ERROR'] as const;
 
 // ==================== COMPONENT ====================
 
@@ -180,11 +181,12 @@ export default function VariantMatchTab() {
       if (res.ok) {
         const s = res.data?.stats;
         const accepted = s?.xmlVariant || 0;
-        const review = s?.needsReview || 0;
-        const manual = s?.manualRequired || 0;
+        const autoSuggest = s?.autoSuggest || 0;
+        const manualReview = s?.manualReview || 0;
+        const errors = s?.errors || 0;
         showToast(
           'success',
-          `✅ Tarama tamamlandı! ${accepted} otomatik kabul, ${review} inceleme, ${manual} manuel`
+          `✅ Tarama tamamlandı! ${accepted} kabul, ${autoSuggest} öneri, ${manualReview} inceleme, ${errors} hata`
         );
         fetchStats();
         fetchProblems();
@@ -231,10 +233,10 @@ export default function VariantMatchTab() {
     switch (status) {
       case 'AUTO_ACCEPTED':
         return { label: 'Otomatik Kabul', color: 'text-green-400 bg-green-500/10 border-green-500/30' };
-      case 'NEEDS_REVIEW':
+      case 'AUTO_SUGGEST':
+        return { label: 'AI Önerisi', color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' };
+      case 'MANUAL_REVIEW':
         return { label: 'İnceleme Gerek', color: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30' };
-      case 'MANUAL_REQUIRED':
-        return { label: 'Manuel Gerekli', color: 'text-orange-400 bg-orange-500/10 border-orange-500/30' };
       case 'ERROR':
         return { label: 'Hatalı', color: 'text-red-400 bg-red-500/10 border-red-500/30' };
       default:
@@ -263,7 +265,7 @@ export default function VariantMatchTab() {
     <div className="space-y-4">
       {/* ===== KPI KARTLARI ===== */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <KpiCard
             title="📦 XML'den Gelen"
             value={(stats.xmlVariant ?? 0).toLocaleString('tr-TR')}
@@ -271,25 +273,19 @@ export default function VariantMatchTab() {
             color="blue"
           />
           <KpiCard
-            title="🤖 DG Oluşturdu"
-            value={(stats.autoCreated ?? 0).toLocaleString('tr-TR')}
-            sub="NEEDS_REVIEW + MANUAL"
+            title="🤖 AI Önerisi"
+            value={(stats.autoSuggest ?? 0).toLocaleString('tr-TR')}
+            sub="AUTO_SUGGEST"
             color="purple"
           />
           <KpiCard
-            title="⚠️ Manuel İnceleme"
-            value={(stats.needsReview ?? 0).toLocaleString('tr-TR')}
-            sub="NEEDS_REVIEW"
+            title="🔍 Manuel İnceleme"
+            value={(stats.manualReview ?? 0).toLocaleString('tr-TR')}
+            sub="MANUAL_REVIEW"
             color="yellow"
           />
           <KpiCard
-            title="🔧 Manuel Gerekli"
-            value={(stats.manualRequired ?? 0).toLocaleString('tr-TR')}
-            sub="MANUAL_REQUIRED"
-            color="orange"
-          />
-          <KpiCard
-            title="❌ Hatalı"
+            title="❌ Hatalı (Müdahale Gerek)"
             value={(stats.errors ?? 0).toLocaleString('tr-TR')}
             sub="ERROR"
             color="red"
@@ -326,11 +322,9 @@ export default function VariantMatchTab() {
             <div className="flex items-center gap-2 text-xs">
               <span className="text-blue-400">📦 {stats.xmlVariant}</span>
               <span className="text-slate-600">|</span>
-              <span className="text-purple-400">🤖 {stats.autoCreated}</span>
+              <span className="text-purple-400">🤖 {stats.autoSuggest}</span>
               <span className="text-slate-600">|</span>
-              <span className="text-yellow-400">⚠️ {stats.needsReview}</span>
-              <span className="text-slate-600">|</span>
-              <span className="text-orange-400">🔧 {stats.manualRequired}</span>
+              <span className="text-yellow-400">🔍 {stats.manualReview}</span>
               <span className="text-slate-600">|</span>
               <span className="text-red-400">❌ {stats.errors}</span>
             </div>
