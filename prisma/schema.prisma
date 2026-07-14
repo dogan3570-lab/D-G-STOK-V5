@@ -158,6 +158,8 @@ model XmlSource {
   updatedAt               DateTime         @updatedAt
   importRuns              XmlImportRun[]
   products                Product[]
+  xmlProfile              XmlProfile?         // V4: XML profili
+  variantFamilies         VariantFamily[]     // V4: oluşturulan aileler
 }
 
 model XmlImportRun {
@@ -695,32 +697,119 @@ model RuleLog {
   createdAt DateTime @default(now())
 }
 
-// ==================== VARYANT MOTORU V2 ====================
+// ==================== VARYANT MOTORU V4.0 ====================
+// Universal XML Profile Engine + Smart Variant Engine
 
 model VariantAnalysis {
-  id            String   @id @default(uuid())
-  productId     String
-  confidence    Int      // 0-100 güven skoru
-  source        String   // XML_PARENT | AI_MATCH | AUTO_CREATED | MANUAL
-  status        String   // AUTO_ACCEPTED | NEEDS_REVIEW | MANUAL_REQUIRED | ERROR
-  reason        String?  // Hata/uyarı sebebi
-  parentSku     String?  // Otomatik oluşturulan parent SKU
-  groupId       String?  // Varyant grup ID'si
-  xmlHasParent  Boolean  @default(false) // XML'de parent SKU var mı?
-  checkResults  String?  // JSON: tüm kontrollerin sonuçları
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String   @id @default(uuid())
+  productId         String
+  confidence        Int      // 0-100 güven skoru
+  source            String   // XML_PARENT | AI_MATCH | AUTO_CREATED | MANUAL | NO_VARIANT_NEEDED
+  status            String   // AUTO_ACCEPTED | AUTO_CREATED | RE_ANALYZED | MANUAL_REVIEW | ERROR
+  reason            String?  // Hata/uyarı sebebi
+  parentSku         String?  // Otomatik oluşturulan parent SKU
+  groupId           String?  // Varyant grup ID'si
+  xmlHasParent      Boolean  @default(false)
+  checkResults      String?  // JSON
+  autoFixAttempted  Boolean  @default(false) // V4: otomatik düzeltme denendi mi?
+  autoFixResult     String?  // V4: JSON - düzeltme sonucu
+  validationPassed  Boolean  @default(false) // V4: doğrulama geçti mi?
+  familyId          String?  // V4: ürün ailesi ID'si
+  profileApplied    Boolean  @default(false) // V4: XML profili kullanıldı mı?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([productId])
   @@index([status])
   @@index([confidence])
+  @@index([familyId])
+}
+
+// V4: XML Profil - Her XML kaynağının profili
+model XmlProfile {
+  id                String   @id @default(uuid())
+  xmlSourceId       String   @unique
+  profileName       String?
+  xmlType           String?  // DISTRIBUTED_VARIANT | SIMPLE | FLAT | UNKNOWN
+
+  // XML Analiz Sonuçları
+  hasParentSku       Boolean  @default(false)
+  parentSkuUsageRate Float    @default(0)
+  hasGroupId         Boolean  @default(false)
+  groupIdUsageRate   Float    @default(0)
+  hasVariationTheme  Boolean  @default(false)
+  variationThemeRate Float    @default(0)
+  hasColor           Boolean  @default(false)
+  colorUsageRate     Float    @default(0)
+  hasSize            Boolean  @default(false)
+  sizeUsageRate      Float    @default(0)
+  hasNumber          Boolean  @default(false)
+  numberUsageRate    Float    @default(0)
+  hasModel           Boolean  @default(false)
+  modelUsageRate     Float    @default(0)
+  barcodeUsageRate   Float    @default(0)
+  skuUsageRate       Float    @default(0)
+
+  // Kalite Skorları (0-100)
+  titleQuality       Int      @default(0)
+  categoryQuality    Int      @default(0)
+  attributeQuality   Int      @default(0)
+
+  // DG STOK Karar
+  dgMode             String   @default("AUTO") // AUTO | SEMI_AUTO | MANUAL
+  canAutoCreate      Boolean  @default(false)
+  lastAnalysisDate   DateTime?
+
+  // Öğrenilen Kurallar
+  learnedRules       String?  // JSON
+  confidence         Float    @default(0)
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  xmlSource          XmlSource @relation(fields: [xmlSourceId], references: [id])
+}
+
+// V4: Ürün Ailesi - DG STOK'un oluşturduğu varyant aileleri
+model VariantFamily {
+  id              String   @id @default(uuid())
+  parentSku       String   @unique
+  groupId         String?
+  generatedBy     String   @default("DG_AUTO") // XML | DG_AUTO | MANUAL
+  productCount    Int      @default(0)
+  marketplaceKey  String?
+  isActive        Boolean  @default(true)
+  xmlSourceId     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  members VariantFamilyMember[]
+  xmlSource XmlSource? @relation(fields: [xmlSourceId], references: [id])
+}
+
+// V4: Ürün Ailesi Üyeleri
+model VariantFamilyMember {
+  id              String   @id @default(uuid())
+  familyId        String
+  productId       String
+  attributeName   String?  // Renk, Beden, Numara, Desen, Materyal
+  attributeValue  String?
+  confidence      Int      @default(0)
+  assignedBy      String   @default("DG_AUTO") // XML | DG_AUTO | AI | MANUAL
+  createdAt       DateTime @default(now())
+
+  family VariantFamily @relation(fields: [familyId], references: [id])
+
+  @@unique([familyId, productId])
+  @@index([familyId])
+  @@index([productId])
 }
 
 model VariantThreshold {
   id        String   @id @default(uuid())
-  key       String   @unique // auto_accept | needs_review | manual
-  value     Int               // eşik değeri (95, 80, 0)
+  key       String   @unique // auto_accept | auto_create | re_analyze | auto_suggest | manual
+  value     Int               // eşik değeri (95, 90, 80, 70, 0)
   updatedAt DateTime @updatedAt
 
   @@index([key])
 }
+
