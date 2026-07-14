@@ -398,6 +398,116 @@ function checkCommunicationInfo(text: string | null): CheckResult {
   };
 }
 
+// ==================== GORSEL KONTROLU ====================
+
+function checkImage(images: string | null, profile: { minImageWidth?: number; minImageHeight?: number; whiteBackground?: boolean }): CheckResult {
+  const issues: string[] = [];
+  let score = 100;
+
+  if (!images) {
+    return { passed: false, score: 20, issues: ['Hiç görsel bulunamadı'], suggestions: ['En az 1 görsel ekleyin'], autoFix: null };
+  }
+
+  const imageList = images.split(',').filter(Boolean).map(i => i.trim());
+  
+  if (imageList.length === 0) {
+    issues.push('Hiç görsel yok');
+    score -= 30;
+  } else if (imageList.length < 3) {
+    issues.push(`Sadece ${imageList.length} görsel var (en az 3 önerilir)`);
+    score -= 10;
+  }
+
+  // Bozuk goruntu baglantisi kontrolu (URL formatinda)
+  for (const img of imageList) {
+    if (!img.startsWith('http://') && !img.startsWith('https://') && !img.startsWith('data:')) {
+      issues.push(`Geçersiz görsel bağlantısı: ${img.slice(0, 50)}`);
+      score -= 15;
+      break;
+    }
+  }
+
+  return {
+    passed: score >= 60,
+    score: Math.max(0, score),
+    issues,
+    suggestions: issues.length > 0 ? ['Görsel sayısını artırın, geçerli URL kullanın'] : [],
+    autoFix: null,
+  };
+}
+
+// ==================== BARKOD KONTROLU ====================
+
+function checkBarcode(barcode: string | null, profile: { barcodeRequired?: boolean; barcodeFormat?: string | null }): CheckResult {
+  const issues: string[] = [];
+  let score = 100;
+
+  if (profile.barcodeRequired && !barcode) {
+    return { passed: false, score: 30, issues: ['Barkod zorunlu ama eksik'], suggestions: ['Barkod girin'], autoFix: null };
+  }
+
+  if (!barcode) {
+    return { passed: true, score: 100, issues: [], suggestions: [], autoFix: null };
+  }
+
+  // EAN13 kontrolu
+  if (barcode.length !== 13 && barcode.length !== 12 && barcode.length !== 8) {
+    issues.push(`Barkod uzunluğu geçersiz (${barcode.length}), EAN13/12/8 olmalı`);
+    score -= 20;
+  }
+
+  // Sadece rakam kontrolu
+  if (!/^\d+$/.test(barcode)) {
+    issues.push('Barkod sadece rakam içermeli');
+    score -= 20;
+  }
+
+  return {
+    passed: score >= 60,
+    score: Math.max(0, score),
+    issues,
+    suggestions: issues.length > 0 ? ['Geçerli bir EAN13 barkod girin'] : [],
+    autoFix: null,
+  };
+}
+
+// ==================== FIYAT KONTROLU ====================
+
+function checkPrice(salePrice: number | null, purchasePrice: number | null): CheckResult {
+  const issues: string[] = [];
+  let score = 100;
+
+  if (!salePrice || salePrice <= 0) {
+    return { passed: false, score: 20, issues: ['Satış fiyatı belirtilmemiş'], suggestions: ['Satış fiyatı girin'], autoFix: null };
+  }
+
+  if (salePrice < 1) {
+    issues.push(`Satış fiyatı çok düşük (${salePrice} TL)`);
+    score -= 20;
+  }
+
+  if (purchasePrice && purchasePrice > 0 && salePrice <= purchasePrice) {
+    issues.push(`Satış fiyatı (${salePrice} TL) alış fiyatından (${purchasePrice} TL) düşük veya eşit`);
+    score -= 25;
+  }
+
+  if (purchasePrice && purchasePrice > 0) {
+    const margin = ((salePrice - purchasePrice) / salePrice) * 100;
+    if (margin < 5) {
+      issues.push(`Kar marjı çok düşük (%${Math.round(margin)})`);
+      score -= 10;
+    }
+  }
+
+  return {
+    passed: score >= 60,
+    score: Math.max(0, score),
+    issues,
+    suggestions: issues.length > 0 ? ['Fiyatları kontrol edin, kar marjını artırın'] : [],
+    autoFix: null,
+  };
+}
+
 // ==================== ANA PIPELINE ====================
 
 export async function checkProductContent(
@@ -428,6 +538,9 @@ export async function checkProductContent(
   const categoryResult = await checkCategory(product.categoryId);
   const descResult = checkDescription(product.description);
   const htmlResult = checkHtml(product.description);
+  const imageResult = checkImage(product.images, profile);
+  const barcodeResult = checkBarcode(product.barcode, profile);
+  const priceResult = checkPrice(product.salePrice, product.purchasePrice);
   const forbiddenResult = await checkForbiddenWords(
     [product.title, product.description].filter(Boolean).join(' '),
     mpKey
@@ -447,6 +560,9 @@ export async function checkProductContent(
     ...categoryResult.issues,
     ...descResult.issues,
     ...htmlResult.issues,
+    ...imageResult.issues,
+    ...barcodeResult.issues,
+    ...priceResult.issues,
     ...forbiddenResult.issues,
     ...competitorResult.issues,
     ...communicationResult.issues,
@@ -456,6 +572,9 @@ export async function checkProductContent(
     ...titleResult.suggestions,
     ...brandResult.suggestions,
     ...descResult.suggestions,
+    ...imageResult.suggestions,
+    ...barcodeResult.suggestions,
+    ...priceResult.suggestions,
     ...forbiddenResult.suggestions,
     ...competitorResult.suggestions,
     ...communicationResult.suggestions,
@@ -723,6 +842,32 @@ export async function seedMarketplaceProfiles(): Promise<number> {
       whiteBackground: true,
       barcodeRequired: true,
       barcodeFormat: 'EAN13',
+    },
+    {
+      marketplaceKey: 'pazarama',
+      marketplaceName: 'Pazarama',
+      maxTitleLength: 150,
+      minTitleLength: 10,
+      emojiPolicy: 'REMOVE',
+      maxUppercaseRatio: 0.3,
+      allowHtml: false,
+      minImageWidth: 400,
+      minImageHeight: 400,
+      whiteBackground: false,
+      barcodeRequired: false,
+    },
+    {
+      marketplaceKey: 'ciceksepeti',
+      marketplaceName: 'ÇiçekSepeti',
+      maxTitleLength: 120,
+      minTitleLength: 10,
+      emojiPolicy: 'WARN',
+      maxUppercaseRatio: 0.3,
+      allowHtml: false,
+      minImageWidth: 600,
+      minImageHeight: 600,
+      whiteBackground: true,
+      barcodeRequired: false,
     },
   ];
 
