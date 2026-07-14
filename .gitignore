@@ -9,3 +9,5 @@ coverage
 *.log
 *.db
 *.sqlite
+prisma/prisma/
+apps/web/dist/
