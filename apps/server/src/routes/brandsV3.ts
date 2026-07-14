@@ -55,26 +55,26 @@ router.get('/list', requireAuth, async (req, res) => {
     const limit = Math.min(1000, Math.max(10, parseInt(String(req.query.limit || '50'))));
     const search = String(req.query.search || '').trim();
 
-    // XML markalarını brand.name'e göre grupla
-    const xmlBrandGroups = await prisma.product.groupBy({
+    // Brand.name uzerinden grupla (XML markalari Brand tablosunda)
+    const brandGroups = await prisma.product.groupBy({
       by: ['brandId'],
       where: { brandId: { not: null } },
       _count: { id: true },
       orderBy: { _count: { id: 'desc' } },
     });
 
-    // Marka detaylarını al
-    const brandIds = xmlBrandGroups.map(g => g.brandId).filter((b): b is string => b !== null);
+    // Marka detaylarini al
+    const brandIds = brandGroups.map(g => g.brandId).filter((b): b is string => b !== null);
     const brands = brandIds.length > 0 ? await prisma.brand.findMany({
       where: { id: { in: brandIds } },
       select: { id: true, name: true },
     }) : [];
     const brandMap = new Map(brands.map(b => [b.id, b.name]));
 
-    // Filter uygula
-    let filtered = xmlBrandGroups;
+    // Filter
+    let filtered = brandGroups;
     if (search) {
-      filtered = xmlBrandGroups.filter(g => {
+      filtered = brandGroups.filter(g => {
         const name = brandMap.get(g.brandId!) || '';
         return name.toLowerCase().includes(search.toLowerCase());
       });
