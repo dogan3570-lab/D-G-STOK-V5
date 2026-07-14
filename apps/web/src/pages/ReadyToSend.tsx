@@ -70,18 +70,16 @@ export default function ReadyToSend() {
   const toggleSelectAll = () => { setSelectedIds(prev => prev.size === products.length ? new Set() : new Set(products.map(p => p.id))); };
   const allSelected = products.length > 0 && selectedIds.size === products.length;
 
-  // Validate before send
+  // Validate before send - her urun icin ayri kontrol
   const validateSend = (ids: string[]): string | null => {
     if (!selectedMpId) return 'Lütfen bir pazaryeri seçin';
     if (ids.length === 0) return 'Lütfen en az 1 ürün seçin';
     
-    // Listing Template kontrolu
-    if (!templatesExist[selectedMpId]) {
-      const mp = marketplaces.find(m => m.id === selectedMpId);
-      return `❌ Listing Template Bulunamadı\nMarketplace: ${mp?.name || selectedMpId}\nSebep: Bu pazaryeri için listing şablonu tanımlanmamış.\nİşlem: Ürün göndermeden önce bir listing şablonu oluşturun veya atayın.`;
+    const noTemplate = products.filter(p => ids.includes(p.id) && !p.templateMatch);
+    if (noTemplate.length > 0) {
+      return `❌ ${noTemplate.length} ürün için listing şablonu bulunamadı.\nLütfen önce Listeleme sekmesinden şablon oluşturun.`;
     }
 
-    // Variant kontrol
     const noVariant = products.filter(p => ids.includes(p.id) && !p.variantMatch);
     if (noVariant.length > 0) {
       return `⚠️ ${noVariant.length} ürünün varyant eşleştirmesi tamamlanmamış`;
