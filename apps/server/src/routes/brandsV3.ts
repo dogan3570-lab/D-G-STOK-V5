@@ -131,32 +131,64 @@ router.get('/preview/:xmlBrandName', requireAuth, async (req, res) => {
   }
 });
 
-// ==================== 4. MATCH ====================
+// ==================== 4. CREATE BRAND (Kullanici kendi markasini olusturur) ====================
+router.post('/create-brand', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'Marka adı zorunludur' } });
+
+    const existing = await prisma.brand.findUnique({ where: { name: name.trim() } });
+    if (existing) return res.json({ ok: true, brand: existing, alreadyExists: true });
+
+    const brand = await prisma.brand.create({ data: { name: name.trim(), isActive: true } });
+    return res.status(201).json({ ok: true, brand, alreadyExists: false });
+  } catch (error) {
+    console.error('[brandsV3] POST create-brand error:', error);
+    return res.status(500).json({ ok: false, error: { code: 'DB_ERROR', message: 'Marka oluşturulamadı' } });
+  }
+});
+
+// ==================== 5. MATCH (xmlBrandName + customBrandName veya dgBrandId ile) ====================
 router.post('/match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
   try {
-    const { xmlBrandName, dgBrandId } = req.body;
-    if (!xmlBrandName || !dgBrandId) return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'xmlBrandName ve dgBrandId zorunludur' } });
+    const { xmlBrandName, dgBrandId, customBrandName } = req.body;
+    if (!xmlBrandName) return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'xmlBrandName zorunludur' } });
+    if (!dgBrandId && !customBrandName) return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'dgBrandId veya customBrandName zorunludur' } });
 
-    const dgBrand = await prisma.brand.findUnique({ where: { id: dgBrandId } });
-    if (!dgBrand) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Marka bulunamadı' } });
+    let targetBrandId = dgBrandId;
+    let targetBrandName = '';
+
+    if (customBrandName) {
+      // Kullanici kendi markasini girdi - bul veya olustur
+      let brand = await prisma.brand.findUnique({ where: { name: customBrandName.trim() } });
+      if (!brand) {
+        brand = await prisma.brand.create({ data: { name: customBrandName.trim(), isActive: true } });
+      }
+      targetBrandId = brand.id;
+      targetBrandName = brand.name;
+    } else {
+      const dgBrand = await prisma.brand.findUnique({ where: { id: dgBrandId } });
+      if (!dgBrand) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Marka bulunamadı' } });
+      targetBrandName = dgBrand.name;
+    }
 
     await prisma.brandMapping.upsert({
       where: { xmlBrandName },
-      update: { dgBrandId, isAuto: false, confidence: 100 },
-      create: { xmlBrandName, dgBrandId, isAuto: false, confidence: 100 },
+      update: { dgBrandId: targetBrandId, isAuto: false, confidence: 100 },
+      create: { xmlBrandName, dgBrandId: targetBrandId, isAuto: false, confidence: 100 },
     });
 
     const result = await prisma.product.updateMany({
       where: { brand: { name: xmlBrandName } },
-      data: { brandId: dgBrandId, brandMatch: true, matchedBy: 'manual', lastMatchDate: new Date(), brandUsageType: 'DG_BRAND' },
+      data: { brandId: targetBrandId, brandMatch: true, matchedBy: 'manual', lastMatchDate: new Date(), brandUsageType: 'DG_BRAND' },
     });
 
     await prisma.brandLog.create({
-      data: { action: 'BRAND_MATCH', xmlBrandName, dgBrandId, dgBrandName: dgBrand.name, productCount: result.count, actorUserId: (req as AuthedRequest).actor?.userId ?? null },
+      data: { action: 'BRAND_MATCH', xmlBrandName, dgBrandId: targetBrandId, dgBrandName: targetBrandName, productCount: result.count, actorUserId: (req as AuthedRequest).actor?.userId ?? null },
     });
 
     clearCache();
-    return res.json({ ok: true, matchedCount: result.count, brandName: dgBrand.name });
+    return res.json({ ok: true, matchedCount: result.count, brandName: targetBrandName });
   } catch (error) {
     console.error('[brandsV3] POST match error:', error);
     return res.status(500).json({ ok: false, error: { code: 'MATCH_ERROR', message: 'Eşleştirme başarısız' } });

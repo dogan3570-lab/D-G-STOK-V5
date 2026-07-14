@@ -116,33 +116,54 @@ export default function BrandMatchTab() {
     fetchPreview(row.xmlBrand);
   };
 
-  // Quick match - single row
-  const handleQuickMatch = async (xmlBrand: string, dgBrandId: string) => {
-    const res = await apiFetch<any>('/brands/v3/match', {
-      method: 'POST',
-      body: JSON.stringify({ xmlBrandName: xmlBrand, dgBrandId }),
-    });
+  // Quick match - single row (dropdown veya custom brand)
+  const handleQuickMatch = async (xmlBrand: string, dgBrandId: string, customBrandName?: string) => {
+    if (!dgBrandId && !customBrandName) { showToast('warning', 'Marka seçin veya yazın'); return; }
+    const body: any = { xmlBrandName: xmlBrand };
+    if (customBrandName) body.customBrandName = customBrandName;
+    else body.dgBrandId = dgBrandId;
+
+    const res = await apiFetch<any>('/brands/v3/match', { method: 'POST', body: JSON.stringify(body) });
     if (res.ok) {
-      showToast('success', `✅ ${xmlBrand} → ${res.data?.brandName || dgBrandId}`);
+      showToast('success', `✅ ${xmlBrand} → ${res.data?.brandName || ''}`);
       fetchStats(); fetchRows(); fetchLogs();
       setSelectedIds(prev => { const n = new Set(prev); n.delete(xmlBrand); return n; });
     }
   };
 
   // Bulk match - selected
+  const [customBulkBrand, setCustomBulkBrand] = useState('');
   const handleBulkMatch = async () => {
-    if (!bulkBrandId || selectedIds.size === 0) { showToast('warning', 'Marka ve en az 1 XML markası seçin'); return; }
-    setProgress({ current: 0, total: selectedIds.size });
-    const res = await apiFetch<any>('/brands/v3/bulk-match', {
-      method: 'POST',
-      body: JSON.stringify({ dgBrandId: bulkBrandId, xmlBrandNames: Array.from(selectedIds) }),
-    });
-    setProgress(null);
-    if (res.ok) {
-      showToast('success', `✅ ${res.data?.matchedCount || 0} ürün eşleştirildi`);
-      setSelectedIds(new Set()); setBulkBrandId('');
-      fetchStats(); fetchRows(); fetchLogs();
+    const targetId = bulkBrandId || '';
+    const targetCustom = customBulkBrand.trim();
+    if ((!targetId && !targetCustom) || selectedIds.size === 0) {
+      showToast('warning', 'Marka seçin/yazın ve en az 1 XML markası seçin');
+      return;
     }
+    setProgress({ current: 0, total: selectedIds.size });
+
+    if (targetCustom) {
+      // Custom brand - once olustur sonra eslestir
+      const createRes = await apiFetch<any>('/brands/v3/create-brand', {
+        method: 'POST', body: JSON.stringify({ name: targetCustom }),
+      });
+      if (createRes.ok && createRes.data?.brand?.id) {
+        const res = await apiFetch<any>('/brands/v3/bulk-match', {
+          method: 'POST', body: JSON.stringify({ dgBrandId: createRes.data.brand.id }),
+        });
+        setProgress(null);
+        if (res.ok) showToast('success', `✅ ${res.data?.matchedCount || 0} ürün eşleştirildi`);
+      }
+    } else {
+      const res = await apiFetch<any>('/brands/v3/bulk-match', {
+        method: 'POST', body: JSON.stringify({ dgBrandId: targetId }),
+      });
+      setProgress(null);
+      if (res.ok) showToast('success', `✅ ${res.data?.matchedCount || 0} ürün eşleştirildi`);
+    }
+
+    setSelectedIds(new Set()); setBulkBrandId(''); setCustomBulkBrand('');
+    fetchStats(); fetchRows(); fetchLogs();
   };
 
   // AI match
@@ -233,12 +254,18 @@ export default function BrandMatchTab() {
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-900/20 border border-blue-700/30">
           <span className="text-xs text-blue-300 font-medium">{selectedIds.size} XML marka seçili</span>
-          <select value={bulkBrandId} onChange={e => setBulkBrandId(e.target.value)}
-            className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white">
-            <option value="">Hedef marka seç...</option>
-            {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <button onClick={handleBulkMatch} disabled={!bulkBrandId}
+          <div className="flex items-center gap-1">
+            <select value={bulkBrandId} onChange={e => { setBulkBrandId(e.target.value); setCustomBulkBrand(''); }}
+              className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white">
+              <option value="">Kayıtlı marka seç...</option>
+              {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <span className="text-[10px] text-slate-500">veya</span>
+            <input type="text" value={customBulkBrand} onChange={e => { setCustomBulkBrand(e.target.value); setBulkBrandId(''); }}
+              placeholder="Özel marka adı..."
+              className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white w-32" />
+          </div>
+          <button onClick={handleBulkMatch} disabled={!bulkBrandId && !customBulkBrand.trim()}
             className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             🔗 {progress ? `${progress.current}/${progress.total}` : 'Toplu Eşleştir'}
           </button>
