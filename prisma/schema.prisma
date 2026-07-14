@@ -15,7 +15,7 @@ model User {
   name      String?
   createdAt DateTime  @default(now())
   auditLogs AuditLog[]
-  preferences String? // JSON: kullanıcı tercihleri (sayfa başına göster, sütun ayarları vb.)
+  preferences String?
 }
 
 model Marketplace {
@@ -35,6 +35,7 @@ model Marketplace {
   messages               Message[]
   templates              ListingTemplate[]
   financeRecords         FinanceRecord[]
+  categoryMappings       CategoryMapping[]
 }
 
 model Product {
@@ -71,15 +72,31 @@ model Product {
   errorMessage           String?
   tags                   String?
   xmlSourceId            String?
-  link                   String?                 // Ürün linki
-  unit                   String?                 // Birim (Adet, kg vb.)
-  currency               String?                 // Para birimi
-  detail                 String?                 // Detaylı açıklama
+  link                   String?
+  unit                   String?
+  currency               String?
+  detail                 String?
+  supplierCategory       String?
+  brandUsageType         String   @default("XML_BRAND") // XML_BRAND | DG_BRAND | CUSTOM
+  customBrandName        String?  // Özel marka adı (CUSTOM seçildiğinde)
+  prefixEnabled          Boolean  @default(false) // Ön ek aktif mi?
+  originalTitle          String?  // Orijinal XML başlığı (korunur)
+  computedTitle          String?  // Ön ek uygulanmış başlık
+  aiSuggestedCategoryId  String?
+  aiScore                Float?
+  matchedBy              String?
+  lastMatchDate          DateTime?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   marketplaceStates      ProductMarketplaceState[]
   variants               Variant[]
   xmlSource              XmlSource?              @relation(fields: [xmlSourceId], references: [id])
+
+  @@index([variantMatch])
+  @@index([xmlSourceId])
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([status])
 }
 
 model ProductMarketplaceState {
@@ -132,20 +149,11 @@ model XmlSource {
   lastRunAt               DateTime?
   lastSuccessAt           DateTime?
   lastError               String?
-  connectionStatus        String           @default("unknown") // "connected", "error", "auth_error", "timeout", "unknown"
-  
-  // KDV Yönetimi
-  purchasePriceVatStatus  String           @default("dahil") // "dahil", "haric", "ekleme"
-  
-  // Fiyatlandırma Motoru Ayarları (JSON)
-  pricingRules            String?          // JSON: fiyatlandırma kuralları dizisi
-  
-  // XML Alan Eşleştirme (JSON)
-  fieldMapping            String?          // JSON: { "xml_field": "system_field", ... }
-  
-  // Alış fiyatı alanı seçimi
-  purchasePriceField      String?          // XML'deki hangi alanın alış fiyatı olarak kullanılacağı
-  
+  connectionStatus        String           @default("unknown")
+  purchasePriceVatStatus  String           @default("dahil")
+  pricingRules            String?
+  fieldMapping            String?
+  purchasePriceField      String?
   createdAt               DateTime         @default(now())
   updatedAt               DateTime         @updatedAt
   importRuns              XmlImportRun[]
@@ -205,17 +213,68 @@ model Category {
   parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children    Category[] @relation("CategoryHierarchy")
   products    Product[]
+  mappings    CategoryMapping[] @relation("CategoryMappings")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 }
 
+model CategoryMapping {
+  id              String    @id @default(uuid())
+  categoryId      String
+  category        Category  @relation("CategoryMappings", fields: [categoryId], references: [id])
+  marketplaceId   String?
+  marketplace     Marketplace? @relation(fields: [marketplaceId], references: [id])
+  externalId      String?
+  externalName    String?
+  externalPath    String?
+  source          String    @default("manual") // "manual", "xml", "ai", "marketplace"
+  confidence      Float?    // AI confidence score
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([categoryId, marketplaceId, source])
+}
+
 model Brand {
-  id          String    @id @default(uuid())
-  name        String    @unique
-  externalId  String?
-  products    Product[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String          @id @default(uuid())
+  name          String          @unique
+  externalId    String?
+  logo          String?         // Marka logosu URL
+  prefixEnabled Boolean         @default(false) // Ön ek aktif mi?
+  prefixFormat  String          @default("MARKA® {title}") // Ön ek formatı
+  isActive      Boolean         @default(true)
+  products      Product[]
+  brandMappings BrandMapping[]  // XML marka eşleştirmeleri
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model BrandMapping {
+  id            String    @id @default(uuid())
+  xmlBrandName  String    @unique // XML'den gelen orijinal marka adı (örn: "NIKE", "NİKE")
+  dgBrandId     String    // Bağlandığı DG STOK markası ID
+  dgBrand       Brand     @relation(fields: [dgBrandId], references: [id])
+  confidence    Float?    // AI güven skoru (0-100)
+  isAuto        Boolean   @default(false) // Otomatik eşleşti mi?
+  productCount  Int       @default(0) // Bu XML markasına sahip ürün sayısı
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model BrandLog {
+  id            String    @id @default(uuid())
+  action        String    // BRAND_MATCH, BRAND_UNMATCH, PREFIX_APPLY, PREFIX_REMOVE, BULK_CHANGE, AI_MATCH, UNDO
+  xmlBrandName  String?   // XML markası
+  dgBrandId     String?   // Hedef DG STOK markası ID
+  dgBrandName   String?   // Hedef marka adı (log okunabilirliği için)
+  oldValue      String?   // Eski değer
+  newValue      String?   // Yeni değer
+  prefixChanged Boolean   @default(false)
+  productCount  Int       @default(0) // Etkilenen ürün sayısı
+  details       String?   // İşlem detayı (JSON)
+  actorUserId   String?   // Kullanıcı ID'si (relationsız, basit tutuldu)
+  createdAt     DateTime  @default(now())
 }
 
 model Variant {
@@ -228,6 +287,8 @@ model Variant {
   updatedAt   DateTime  @updatedAt
 
   @@unique([productId, name, value])
+  @@index([name])
+  @@index([productId])
 }
 
 model Order {
@@ -305,10 +366,57 @@ model ListingTemplate {
   vatRate       Float?
   cargoSettings String?
   imageSettings String?
+  productId     String?
   categoryId    String?
   brandId       String?
   variantSettings String?
   active        Boolean   @default(true)
+
+  // === V3 ENTERPRISE ALANLARI ===
+
+  // --- Fiyat Motoru ---
+  priceSource        String  @default("XML_PURCHASE") // XML_PURCHASE | XML_SALE | FIXED | AI_CALCULATE
+  vatMode            String  @default("INCLUDED")     // INCLUDED | EXCLUDED | BY_CATEGORY | AUTO
+  priceMultiplier    Float   @default(1.0)            // x1.20, %180 => 1.8 olarak
+  priceFixedAmount   Float   @default(0)              // +0 TL ila +100 TL
+  priceRangeRules    String? // JSON: [{min:0, max:100, multiplier:2.2, fixedAmount:20}, ...]
+
+  // --- Dışlama (Exclude) Kuralları ---
+  excludeRules       String? // JSON: {categories:[], brands:[], suppliers:[], products:[], skus:[], barcodes:[]}
+
+  // --- Başlık Şablonu V3 ---
+  titleVariables     String? // JSON: variableId yapılandırması
+  titleMaxLength     Int?    // Karakter limiti
+  titleSeoMaxLength  Int?    // SEO karakter limiti
+
+  // --- Açıklama Şablonu V3 ---
+  descriptionBlocks  String? // JSON: [{type:'text'|'table'|'list'|'techspecs'|'ai'|'block', content:'...'}, ...]
+  descriptionMaxLength Int?  // Karakter limiti
+
+  // --- Görsel Kuralları V3 ---
+  imageMinCount      Int?    // Minimum görsel sayısı
+  imageMaxCount      Int?    // Maksimum görsel sayısı
+  imageOrder         String? // SEQUENTIAL | RANDOM | MANUAL
+  imageWatermark     String? // Filigran metni veya URL
+  imageBackground    String? // WHITE | TRANSPARENT | COLOR
+  imageMinSize       Int?    // Minimum piksel (örn: 800)
+  imageFormat        String? // JPEG | PNG | WEBP
+
+  // --- Stok Kuralları ---
+  stockMultiplier    Int?    // Stok çarpanı (örn: 5)
+  stockMinValue      Int?    // Minimum stok
+  stockMaxValue      Int?    // Maksimum stok
+  stockHide          Boolean @default(false) // Stok sıfırsa gizle
+  stockAutoDeactivate Boolean @default(false) // Stok sıfırsa otomatik pasife al
+
+  // --- Barkod Kuralları ---
+  barcodePrefix      String? // Barkod ön eki
+  barcodeSuffix      String? // Barkod son eki
+  barcodeAutoGenerate Boolean @default(false) // Barkod yoksa otomatik üret
+
+  // --- Doğrulama ---
+  validationRules    String? // JSON: etkin doğrulama kuralları dizisi
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -322,19 +430,36 @@ model Setting {
 model AutomationRule {
   id            String    @id @default(uuid())
   name          String
-  type          String    // "xml_sync", "price_update", "stock_update", "order_sync", "cargo_sync", "notification"
-  triggerType   String    // "schedule", "webhook", "cron", "event"
-  triggerConfig String?   // JSON: schedule interval, cron expression, webhook URL etc.
-  actionType    String    // "sync_xml", "update_price", "update_stock", "sync_order", "send_notification"
-  actionConfig  String?   // JSON: action-specific configuration
+  type          String
+  triggerType   String
+  triggerConfig String?
+  actionType    String
+  actionConfig  String?
   active        Boolean   @default(true)
-  schedule      String?   // Cron expression or interval string
+  schedule      String?
   marketplaceId String?
   lastRunAt     DateTime?
   lastSuccessAt DateTime?
   lastError     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model TransformationLog {
+  id          String   @id @default(uuid())
+  productId   String
+  xmlSourceId String?
+  action      String   // TRANSFORM, CLEAN, AI_SUGGEST, BULK_CONVERT, UNDO, REDO
+  oldTitle    String?
+  newTitle    String?
+  oldBrand    String?
+  newBrand    String?
+  oldBrandId  String?
+  newBrandId  String?
+  stepType    String?  // BRAND, TITLE, CLEAN, SEO
+  details     String?  // JSON
+  actorUserId String?
+  createdAt   DateTime @default(now())
 }
 
 model FinanceRecord {
@@ -352,4 +477,250 @@ model FinanceRecord {
   description   String?
   date          DateTime    @default(now())
   createdAt     DateTime    @default(now())
+}
+
+model BrandPolicy {
+  id              String    @id @default(uuid())
+  name            String    // Politika adı
+  policyType      Int       // 1-7 arası politika tipi
+  xmlSourceId     String?   // Hangi XML kaynağı için (null = tümü)
+  dgBrandId       String?   // Kullanılacak DG STOK markası
+  prefixFormat    String?   // Ön ek formatı (Politika 4,6,7 için)
+  separator       String    @default(" | ") // Ayraç (Politika 5 için)
+  removeXmlBrand  Boolean   @default(false) // XML markayı temizle (Politika 7)
+  isActive        Boolean   @default(true)
+  priority        Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model TitleTemplate {
+  id            String    @id @default(uuid())
+  name          String    // Şablon adı
+  template      String    // "{BRAND}® {PRODUCT_NAME} | {COLOR}"
+  xmlSourceId   String?   // XML kaynağı (null=tümü)
+  brandId       String?   // Marka (null=tümü)
+  categoryId    String?   // Kategori (null=tümü)
+  marketplaceId String?   // Pazaryeri (null=tümü)
+  priority      Int       @default(0)
+  isActive      Boolean   @default(true)
+  maxLength     Int?      // Karakter limiti
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model ForbiddenWord {
+  id            String    @id @default(uuid())
+  word          String    @unique
+  marketplaces  String?   // Hangi pazaryerleri için (JSON array)
+  createdAt     DateTime  @default(now())
+}
+
+model WorkflowState {
+  id          String   @id @default(uuid())
+  productId   String   @unique
+  status      String   @default("IMPORTED")
+  readiness   Int      @default(0)
+  stepCategory String? // OK, MISSING, AUTO_FIXED
+  stepBrand   String?
+  stepVariant String?
+  stepTitle   String?
+  stepSeo     String?
+  stepPrice   String?
+  stepImage   String?
+  stepBarcode String?
+  stepStock   String?
+  errorCount  Int      @default(0)
+  lastError   String?
+  aiSuggested Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WorkflowTimeline {
+  id          String   @id @default(uuid())
+  productId   String
+  event       String
+  details     String?
+  actorUserId String?
+  createdAt   DateTime @default(now())
+}
+
+model MarketplaceTitleConfig {
+  id            String    @id @default(uuid())
+  key           String    @unique // trendyol, amazon, n11, hepsiburada
+  name          String
+  logo          String?
+  maxLength     Int       @default(150)
+  seoMaxLength  Int       @default(70)
+  createdAt     DateTime  @default(now())
+}
+
+model AIKnowledge {
+  id          String   @id @default(uuid())
+  module      String   // CATEGORY, BRAND, TITLE, SEO, ATTRIBUTE, VARIANT
+  input       String   // Girdi
+  output      String   // Çıktı
+  confidence  Float    @default(0)
+  useCount    Int      @default(0)
+  acceptCount Int      @default(0)
+  rejectCount Int      @default(0)
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([module, input, output])
+}
+
+model AIUserPolicy {
+  id                 String   @id @default(uuid())
+  module             String   @unique
+  autoApplyThreshold Int      @default(95)
+  requireApproval    Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model AIDecisionLog {
+  id          String   @id @default(uuid())
+  productId   String
+  module      String
+  suggestion  String
+  confidence  Float
+  reason      String?
+  autoApplied Boolean  @default(false)
+  accepted    Boolean?
+  actorUserId String?
+  createdAt   DateTime @default(now())
+}
+
+model ProductHistory {
+  id          String   @id @default(uuid())
+  productId   String
+  field       String   // status, brandId, categoryId, salePrice, stock, title
+  oldValue    String?
+  newValue    String?
+  action      String   // XML_IMPORT, CATEGORY_MATCH, BRAND_MATCH, TITLE_UPDATE, PRICE_UPDATE, STOCK_UPDATE
+  actorUserId String?
+  createdAt   DateTime @default(now())
+}
+
+// ==================== VARYANT EŞLEŞTİRME MERKEZİ V6.0 ====================
+
+model VariantPool {
+  id          String   @id @default(uuid())
+  parentSku   String
+  productId   String?
+  totalChildren Int    @default(0)
+  status      String   @default("pending") // pending, partial, ready, error
+  source      String?  // XML'den gelen kaynak (manual, ai, auto)
+  scannedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([parentSku])
+  @@index([status])
+}
+
+model MarketplaceVariantRule {
+  id                String   @id @default(uuid())
+  marketplaceKey    String   @unique
+  marketplaceName   String
+  requiredAttributes String  // JSON array: ["Renk", "Beden"]
+  optionalAttributes String  // JSON array: ["Numara", "Cinsiyet"]
+  maxVariantsPerGroup Int    @default(100)
+  variantGroupRequired Boolean @default(true)
+  colorMapping      String?  // JSON object for color translations
+  sizeMapping       String?  // JSON object for size translations
+  attributeRules    String?  // JSON: her attribute için kurallar
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model VariantMapping {
+  id              String   @id @default(uuid())
+  xmlValue        String   // XML'den gelen orijinal değer
+  attributeType   String   // Renk, Beden, Numara, vb.
+  mappedValue     String   // Eşleştirilen değer
+  marketplaceKey  String?  // Hangi pazaryeri için (null = evrensel)
+  confidence      Float?   // AI güven skoru
+  source          String   @default("manual") // manual, ai, auto, pattern
+  useCount        Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([xmlValue, attributeType, marketplaceKey])
+  @@index([attributeType])
+  @@index([marketplaceKey])
+}
+
+model VariantValidationLog {
+  id              String   @id @default(uuid())
+  productId       String
+  parentSku       String?
+  score           Int      @default(0)
+  status          String   // ready, needs_review, blocked
+  errors          String?  // JSON array of error messages
+  checks          String?  // JSON: {checkName: boolean}
+  marketplaceKey  String?
+  validatedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+}
+model Rule {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  category      String   // CATEGORY, BRAND, TITLE, SEO, PRICE, STOCK
+  condition     String   // JSON: { field, operator, value }
+  action        String   // JSON: { type, value }
+  priority      Int      @default(0)
+  isActive      Boolean  @default(true)
+  version       Int      @default(1)
+  xmlSourceId   String?
+  brandId       String?
+  categoryId    String?
+  marketplaceId String?
+  testResult    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model RuleLog {
+  id        String   @id @default(uuid())
+  ruleId    String
+  productId String
+  result    String   // APPLIED, SKIPPED, ERROR
+  details   String?
+  createdAt DateTime @default(now())
+}
+
+// ==================== VARYANT MOTORU V2 ====================
+
+model VariantAnalysis {
+  id            String   @id @default(uuid())
+  productId     String
+  confidence    Int      // 0-100 güven skoru
+  source        String   // XML_PARENT | AI_MATCH | AUTO_CREATED | MANUAL
+  status        String   // AUTO_ACCEPTED | NEEDS_REVIEW | MANUAL_REQUIRED | ERROR
+  reason        String?  // Hata/uyarı sebebi
+  parentSku     String?  // Otomatik oluşturulan parent SKU
+  groupId       String?  // Varyant grup ID'si
+  xmlHasParent  Boolean  @default(false) // XML'de parent SKU var mı?
+  checkResults  String?  // JSON: tüm kontrollerin sonuçları
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([productId])
+  @@index([status])
+  @@index([confidence])
+}
+
+model VariantThreshold {
+  id        String   @id @default(uuid())
+  key       String   @unique // auto_accept | needs_review | manual
+  value     Int               // eşik değeri (95, 80, 0)
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
 }

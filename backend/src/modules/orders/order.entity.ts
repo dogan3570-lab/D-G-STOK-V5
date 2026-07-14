@@ -1,5 +1,6 @@
-﻿import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, OneToMany } from 'typeorm';
+﻿import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { OrderItem } from './order-item.entity';
+import { User } from '../users/user.entity';
 
 export enum OrderStatus {
   PENDING = 'pending',
@@ -40,6 +41,10 @@ export class Order {
 
   @Column({ nullable: true })
   customerEmail: string;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: 'customerId' })
+  customer: User;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   totalAmount: number;

@@ -27,6 +27,10 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
       if (data.ok) {
         localStorage.setItem('dgstok_loggedin', 'true');
+        // Token'ı localStorage'a kaydet (Authorization header'da kullanmak için)
+        if (data.token) {
+          localStorage.setItem('dgstok_token', data.token);
+        }
         onLoginSuccess();
       } else {
         setError('E-posta veya şifre hatalı');

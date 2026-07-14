@@ -7,9 +7,16 @@ interface DashboardStats {
   totalMarketplaces: number;
   totalXmlSources: number;
   activeXmlSources: number;
+  passiveXmlSources: number;
+  xmlSourcesWithError: number;
+  todayXmlUpdates: number;
   lowStockProducts: number;
   errorProducts: number;
+  readyProducts: number;
   todayOrders: number;
+  brandCount?: number;
+  categoryCount?: number;
+  variantCount?: number;
 }
 
 interface MarketplaceItem {
@@ -52,16 +59,19 @@ export default function Dashboard() {
 
   async function fetchAllData() {
     try {
-      const [statsRes, marketplacesRes, xmlRes, brandsRes, categoriesRes, variantsRes] = await Promise.all([
+      const [statsRes, marketplacesRes, xmlRes] = await Promise.all([
         fetch('/dashboard/stats', { credentials: 'include' }),
         fetch('/marketplaces', { credentials: 'include' }),
         fetch('/xml-sources', { credentials: 'include' }),
-        fetch('/brands', { credentials: 'include' }),
-        fetch('/categories', { credentials: 'include' }),
-        fetch('/variants', { credentials: 'include' }),
       ]);
 
-      if (statsRes.ok) setStats(await statsRes.json());
+      if (statsRes.ok) {
+        const d = await statsRes.json();
+        setStats(d);
+        setBrandCount(d.brandCount || 0);
+        setCategoryCount(d.categoryCount || 0);
+        setVariantCount(d.variantCount || 0);
+      }
       if (marketplacesRes.ok) {
         const data = await marketplacesRes.json();
         setMarketplaces(data.items || []);
@@ -69,18 +79,6 @@ export default function Dashboard() {
       if (xmlRes.ok) {
         const data = await xmlRes.json();
         setXmlSources(data.items || []);
-      }
-      if (brandsRes.ok) {
-        const data = await brandsRes.json();
-        setBrandCount(data.items?.length || 0);
-      }
-      if (categoriesRes.ok) {
-        const data = await categoriesRes.json();
-        setCategoryCount(data.items?.length || 0);
-      }
-      if (variantsRes.ok) {
-        const data = await variantsRes.json();
-        setVariantCount(data.items?.length || 0);
       }
     } catch (error) {
       console.error('Dashboard veri çekme hatası:', error);
@@ -136,7 +134,10 @@ export default function Dashboard() {
   const errorProducts = stats?.errorProducts || 0;
   const lowStockProducts = stats?.lowStockProducts || 0;
   const activeXmlCount = stats?.activeXmlSources || 0;
-  const readyCount = totalProducts - errorProducts;
+  const passiveXmlCount = stats?.passiveXmlSources || 0;
+  const xmlErrorCount = stats?.xmlSourcesWithError || 0;
+  const todayXmlUpdates = stats?.todayXmlUpdates || 0;
+  const readyCount = stats?.readyProducts || 0;
 
   return (
     <div className="space-y-6">
@@ -146,12 +147,12 @@ export default function Dashboard() {
           <div>
             <div className="flex items-center gap-2">
               <span className="flex h-3 w-3 animate-pulse rounded-full bg-green-500"></span>
-              <h2 className="text-lg font-semibold text-white">CANLI SİSTEM</h2>
+              <h2 className="text-lg font-semibold text-white">KONTROL PANELİ</h2>
             </div>
-            <p className="mt-1 text-sm text-slate-400">D&G STOK v5.0 Performans Paneli</p>
+            <p className="mt-1 text-sm text-slate-400">D&G STOK v5.0 Kontrol Paneli</p>
             <p className="text-xs text-slate-500">
-              {activeXmlCount > 0 
-                ? `${activeXmlCount} aktif XML kaynağı ile ${totalProducts} ürün senkronize ediliyor.`
+              {activeXmlCount > 0
+                ? `${activeXmlCount} aktif XML kaynağı ile ${(totalProducts ?? 0).toLocaleString('tr-TR')} ürün senkronize ediliyor.`
                 : 'Henüz aktif XML kaynağı bulunmuyor.'}
             </p>
           </div>
@@ -237,6 +238,27 @@ export default function Dashboard() {
           color="blue"
         />
         <KpiCard
+          title="PASİF XML KAYNAK"
+          value={passiveXmlCount}
+          subtitle="Devre dışı kaynaklar"
+          icon="🔌"
+          color="yellow"
+        />
+        <KpiCard
+          title="HATALI XML"
+          value={xmlErrorCount}
+          subtitle="Bağlantı sorunu olanlar"
+          icon="⚠️"
+          color="red"
+        />
+        <KpiCard
+          title="BUGÜN XML GÜNCELLEME"
+          value={todayXmlUpdates}
+          subtitle="Bugün senkronize edilen"
+          icon="🔄"
+          color="green"
+        />
+        <KpiCard
           title="BUGÜNKÜ SİPARİŞ"
           value={stats?.todayOrders || 0}
           subtitle="Bugün gelen sipariş"
@@ -287,6 +309,26 @@ export default function Dashboard() {
           <div className="rounded-lg border border-slate-600 bg-slate-700/30 p-4">
             <div className="text-xs text-slate-400">PAZARYERİ SAYISI</div>
             <div className="mt-2 text-xl font-semibold text-white">{marketplaces.length}</div>
+          </div>
+          <div className="rounded-lg border border-slate-600 bg-slate-700/30 p-4">
+            <div className="text-xs text-slate-400">TOPLAM XML KAYNAK</div>
+            <div className="mt-2 text-xl font-semibold text-white">{stats?.totalXmlSources || 0}</div>
+          </div>
+          <div className="rounded-lg border border-slate-600 bg-slate-700/30 p-4">
+            <div className="text-xs text-slate-400">AKTİF XML</div>
+            <div className="mt-2 text-xl font-semibold text-white">{activeXmlCount}</div>
+          </div>
+          <div className="rounded-lg border border-slate-600 bg-slate-700/30 p-4">
+            <div className="text-xs text-slate-400">PASİF XML</div>
+            <div className="mt-2 text-xl font-semibold text-white">{passiveXmlCount}</div>
+          </div>
+          <div className="rounded-lg border border-slate-600 bg-slate-700/30 p-4">
+            <div className="text-xs text-slate-400">HATALI XML</div>
+            <div className="mt-2 text-xl font-semibold text-red-400">{xmlErrorCount}</div>
+          </div>
+          <div className="rounded-lg border border-slate-600 bg-slate-700/30 p-4">
+            <div className="text-xs text-slate-400">BUGÜN XML GÜNCELLEME</div>
+            <div className="mt-2 text-xl font-semibold text-green-400">{todayXmlUpdates}</div>
           </div>
         </div>
       </div>

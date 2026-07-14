@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma.ts';
+import { broadcast } from '../sse/websocket.ts';
 
 export type XmlImportResult = {
   ok: boolean;
@@ -6,15 +7,26 @@ export type XmlImportResult = {
   updatedCount: number;
   skippedCount?: number;
   failedCount?: number;
+  filteredCount?: number;
   items: Array<{ xmlKey: string; created: boolean; matchedBy?: 'xmlKey' | 'sku'; outcome?: string; errorDetail?: string }>;
   error?: { code: string; message: string };
   runId?: string;
 };
 
+export type XmlImportFilter = {
+  filterOutOfStock?: boolean;
+  includeCategories?: string[];
+  excludeBrands?: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  searchKeywords?: string[];
+  includeBarcodes?: string[];
+};
+
 export type XmlImportProduct = {
   xmlKey: string;
   title: string | null;
-  sku: string | null;
+  sku: string;
   barcode: string | null;
   stock: number;
   minStock: number;
@@ -84,20 +96,132 @@ function parseXmlDocument(xml: string) {
   return { ok: true as const, source };
 }
 
+/**
+ * Resim URL'lerini doğrular.
+ * - HTTPS kontrolü
+ * - Geçerli URL formatı
+ * - Bilinen resim uzantıları
+ * - HTTP vs HTTPS dağılımı
+ */
+export interface ImageValidationResult {
+  totalUrls: number;
+  validUrls: number;
+  httpsCount: number;
+  httpCount: number;
+  invalidFormatUrls: number;
+  suspiciousUrls: string[];
+}
+
+export function validateImageUrls(images: string | null): ImageValidationResult {
+  const result: ImageValidationResult = {
+    totalUrls: 0,
+    validUrls: 0,
+    httpsCount: 0,
+    httpCount: 0,
+    invalidFormatUrls: 0,
+    suspiciousUrls: [],
+  };
+
+  if (!images) return result;
+
+  const urls = images.split(',').filter(Boolean);
+  result.totalUrls = urls.length;
+
+  const validExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+
+  for (const url of urls) {
+    const trimmed = url.trim();
+    if (!trimmed.startsWith('http')) {
+      result.invalidFormatUrls++;
+      result.suspiciousUrls.push(trimmed);
+      continue;
+    }
+
+    if (trimmed.startsWith('https')) {
+      result.httpsCount++;
+    } else {
+      result.httpCount++;
+    }
+
+    // Uzantı kontrolü
+    const ext = trimmed.split('.').pop()?.toLowerCase().split('?')[0];
+    if (ext && validExtensions.includes(ext)) {
+      result.validUrls++;
+    }
+  }
+
+  return result;
+}
+
 function normalizeText(value: string | null | undefined): string | null {
   if (value == null) return null;
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > 0 ? normalized : null;
 }
 
+/**
+ * Türkçe karakterleri İngilizce karşılıklarına dönüştürür.
+ */
+function normalizeTurkishChars(value: string): string {
+  const charMap: Record<string, string> = {
+    'ı': 'i', 'ğ': 'g', 'ü': 'u', 'ş': 's', 'ö': 'o', 'ç': 'c',
+    'İ': 'I', 'Ğ': 'G', 'Ü': 'U', 'Ş': 'S', 'Ö': 'O', 'Ç': 'C',
+    'â': 'a', 'î': 'i', 'û': 'u', 'ô': 'o',
+    'Â': 'A', 'Î': 'I', 'Û': 'U', 'Ô': 'O',
+  };
+  return value.replace(/[ığüşöçİĞÜŞÖÇâîûôÂÎÛÔ]/g, (ch) => charMap[ch] || ch);
+}
+
+/**
+ * Metinden emoji ve özel sembolleri temizler.
+ */
+function removeEmojis(value: string): string {
+  return value
+    .replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Emoticons
+    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Misc Symbols
+    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // Transport
+    .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '') // Flags
+    .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Misc
+    .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+    .replace(/[\u{FE00}-\u{FE0F}]/gu, '')   // Variation Selectors
+    .replace(/[\u{200D}]/gu, '')            // Zero Width Joiner
+    .trim();
+}
+
+/**
+ * Barkod değerini temizler: sadece alfanumerik karakterler bırakır.
+ */
+function cleanBarcode(value: string | null): string | null {
+  if (!value) return null;
+  return value.replace(/[^A-Za-z0-9]/g, '').trim() || null;
+}
+
+/**
+ * SKU oluşturur (yoksa xmlKey'den türetir).
+ */
+function generateSku(xmlKey: string, title?: string | null): string {
+  if (xmlKey.length <= 20) return xmlKey;
+  // Uzun xmlKey'lerden kısa SKU oluştur
+  const prefix = (title || xmlKey).substring(0, 3).toUpperCase();
+  const hash = Math.abs(xmlKey.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)).toString(36).toUpperCase();
+  return `${prefix}${hash}`;
+}
+
+/**
+ * HTML entity'leri decode eder.
+ * ÖNCE named entity'ler dönüştürülür, SONRA & -> & yapılır.
+ * Bu sıralama önemlidir: & önce dönüştürülürse < → &lt; haline gelir ve bozulur.
+ */
 function decodeEntities(value: string): string {
   return value
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&/gi, '&')
     .replace(/</gi, '<')
     .replace(/>/gi, '>')
-    .replace(/&#39;/gi, "'")
-    .replace(/"/gi, '"');
+    .replace(/'/gi, "'")
+    .replace(/"/gi, '"')
+    .replace(/&/gi, '&')
+    // Kalan & işaretlerini de dönüştür (entity olmayan tek başına &)
+    .replace(/&(?![a-zA-Z#])/g, '&');
 }
 
 function stripTags(value: string): string {
@@ -109,7 +233,6 @@ function extractTagValue(content: string, tagName: string): string | null {
   const match = regex.exec(content);
   if (!match) return null;
   
-  // Önce CDATA içeriğini çıkar
   let value = match[1];
   const cdataMatch = value.match(/<!\[CDATA\[([\s\S]*?)\]\]>/);
   if (cdataMatch) {
@@ -117,6 +240,10 @@ function extractTagValue(content: string, tagName: string): string | null {
   } else {
     value = stripTags(value);
   }
+  
+  // Normalizasyon: Türkçe karakter düzelt, emoji kaldır
+  value = normalizeTurkishChars(value);
+  value = removeEmojis(value);
   
   return normalizeText(value);
 }
@@ -138,7 +265,6 @@ export function parseXmlImportPayload(xml: string): XmlImportProduct[] {
     .map((match) => {
       const content = match[2] ?? '';
 
-      // XML'deki alanları dene - önce standart alanlar, sonra alternatifler
       const xmlKey = extractTagValue(content, 'xmlKey') || extractTagValue(content, 'id');
       if (!xmlKey) return null;
 
@@ -162,10 +288,8 @@ export function parseXmlImportPayload(xml: string): XmlImportProduct[] {
       const unit = extractTagValue(content, 'unit');
       const activeValue = extractTagValue(content, 'active');
 
-      // Resimleri topla - image1, image2, image3... ve ayrıca images, picture, resim tag'lerini de dene
       const images: string[] = [];
       
-      // Önce images tag'ini dene (virgülle ayrılmış URL'ler)
       const imagesTag = extractTagValue(content, 'images') || extractTagValue(content, 'pictures') || extractTagValue(content, 'resimler');
       if (imagesTag) {
         imagesTag.split(',').forEach(img => {
@@ -174,19 +298,16 @@ export function parseXmlImportPayload(xml: string): XmlImportProduct[] {
         });
       }
       
-      // image1, image2, image3... tag'lerini dene
       for (let i = 1; i <= 10; i++) {
         const img = extractTagValue(content, `image${i}`) || extractTagValue(content, `picture${i}`) || extractTagValue(content, `resim${i}`);
         if (img && img.startsWith('http')) images.push(img);
       }
       
-      // image, picture, resim tag'lerini dene (tekli)
       if (images.length === 0) {
         const singleImg = extractTagValue(content, 'image') || extractTagValue(content, 'picture') || extractTagValue(content, 'resim') || extractTagValue(content, 'img') || extractTagValue(content, 'gorsel');
         if (singleImg && singleImg.startsWith('http')) images.push(singleImg);
       }
       
-      // Ayrıca <image> içinde <url> alt tag'i olabilir
       if (images.length === 0) {
         const imageUrlRegex = /<image[^>]*>[\s\S]*?<url>([^<]+)<\/url>[\s\S]*?<\/image>/gi;
         const urlMatches = Array.from(content.matchAll(imageUrlRegex));
@@ -196,7 +317,6 @@ export function parseXmlImportPayload(xml: string): XmlImportProduct[] {
         });
       }
       
-      // Son çare: içerikteki tüm http linklerini tara
       if (images.length === 0) {
         const urlRegex = /(https?:\/\/[^\s"'<>]+(?:jpg|jpeg|png|gif|webp|bmp))/gi;
         const urlMatches = Array.from(content.matchAll(urlRegex));
@@ -208,9 +328,9 @@ export function parseXmlImportPayload(xml: string): XmlImportProduct[] {
 
       return {
         xmlKey,
-        title,
-        sku,
-        barcode,
+        title: title || null,
+        sku: sku || generateSku(xmlKey, title),
+        barcode: cleanBarcode(barcode),
         stock: Number.parseInt(stockValue ?? '0', 10),
         minStock: Number.parseInt(minStockValue ?? '0', 10),
         price: priceValue ? Number.parseFloat(priceValue) : null,
@@ -233,66 +353,112 @@ export function parseXmlImportPayload(xml: string): XmlImportProduct[] {
     .filter((item): item is XmlImportProduct => item != null);
 }
 
-// Kategori adına göre sistemde ara, bulamazsa oluştur
-async function findOrCreateCategory(categoryName: string | null): Promise<{ id: string | null; matched: boolean }> {
-  if (!categoryName) return { id: null, matched: false };
-  
-  const normalized = categoryName.trim();
-  if (!normalized) return { id: null, matched: false };
+// Eşzamanlı sync'leri önlemek için basit bir kilit mekanizması
+const syncLocks = new Map<string, boolean>();
 
-  // Önce tam eşleşme ara
-  let category = await prisma.category.findUnique({ where: { name: normalized } });
-  if (category) return { id: category.id, matched: true };
+// İptal mekanizması: her sync işlemi için bir AbortController
+const abortControllers = new Map<string, AbortController>();
 
-  // Büyük/küçük harf duyarsız ara
-  category = await prisma.category.findFirst({
-    where: { name: { contains: normalized } },
-  });
-  if (category) return { id: category.id, matched: true };
+const BATCH_SIZE = 500; // Performans için batch boyutunu artır
+const MAX_SYNC_DURATION_MS = 10 * 60 * 1000; // 10 dakika max sync süresi
 
-  // Bulamazsa otomatik oluştur
-  try {
-    category = await prisma.category.create({
-      data: { name: normalized },
-    });
-    return { id: category.id, matched: true };
-  } catch {
-    return { id: null, matched: false };
+/**
+ * Devam eden bir sync işlemini iptal eder.
+ */
+export function cancelSync(sourceId: string): boolean {
+  const controller = abortControllers.get(sourceId);
+  if (controller) {
+    controller.abort();
+    abortControllers.delete(sourceId);
+    syncLocks.delete(sourceId);
+    console.log(`[Import] Sync cancelled for source ${sourceId}`);
+    return true;
   }
+  return false;
 }
 
-// Marka adına göre sistemde ara, bulamazsa oluştur
-async function findOrCreateBrand(brandName: string | null): Promise<{ id: string | null; matched: boolean }> {
-  if (!brandName) return { id: null, matched: false };
-  
-  const normalized = brandName.trim();
-  if (!normalized) return { id: null, matched: false };
-
-  // Önce tam eşleşme ara
-  let brand = await prisma.brand.findUnique({ where: { name: normalized } });
-  if (brand) return { id: brand.id, matched: true };
-
-  // Büyük/küçük harf duyarsız ara
-  brand = await prisma.brand.findFirst({
-    where: { name: { contains: normalized } },
-  });
-  if (brand) return { id: brand.id, matched: true };
-
-  // Bulamazsa otomatik oluştur
-  try {
-    brand = await prisma.brand.create({
-      data: { name: normalized },
-    });
-    return { id: brand.id, matched: true };
-  } catch {
-    return { id: null, matched: false };
-  }
+/**
+ * Sync işlemi için kaynak kilitli mi kontrol eder.
+ */
+export function isSyncLocked(sourceId: string): boolean {
+  return syncLocks.get(sourceId) === true;
 }
 
-export async function importXmlProducts(xml: string, options?: { actorUserId?: string | null; sourceName?: string | null; sourceId?: string | null }) {
+function applyImportFilter(items: XmlImportProduct[], filter?: XmlImportFilter): { filtered: XmlImportProduct[]; filteredCount: number } {
+  if (!filter) return { filtered: items, filteredCount: 0 };
+
+  let filtered = [...items];
+  let filteredCount = 0;
+
+  if (filter.filterOutOfStock) {
+    const before = filtered.length;
+    filtered = filtered.filter(item => item.stock > 0);
+    filteredCount += before - filtered.length;
+  }
+
+  if (filter.includeCategories && filter.includeCategories.length > 0) {
+    const cats = filter.includeCategories.map(c => c.toLowerCase());
+    const before = filtered.length;
+    filtered = filtered.filter(item => {
+      const itemCats = [item.category, item.mainCategory, item.subCategory, item.topCategory]
+        .filter(Boolean)
+        .map(c => c!.toLowerCase());
+      return itemCats.some(ic => cats.some(c => ic.includes(c)));
+    });
+    filteredCount += before - filtered.length;
+  }
+
+  if (filter.excludeBrands && filter.excludeBrands.length > 0) {
+    const brands = filter.excludeBrands.map(b => b.toLowerCase());
+    const before = filtered.length;
+    filtered = filtered.filter(item => !item.brand || !brands.some(b => item.brand!.toLowerCase().includes(b)));
+    filteredCount += before - filtered.length;
+  }
+
+  if (filter.minPrice != null) {
+    const before = filtered.length;
+    filtered = filtered.filter(item => item.price == null || item.price >= filter.minPrice!);
+    filteredCount += before - filtered.length;
+  }
+
+  if (filter.maxPrice != null) {
+    const before = filtered.length;
+    filtered = filtered.filter(item => item.price == null || item.price <= filter.maxPrice!);
+    filteredCount += before - filtered.length;
+  }
+
+  if (filter.searchKeywords && filter.searchKeywords.length > 0) {
+    const keywords = filter.searchKeywords.map(k => k.toLowerCase());
+    const before = filtered.length;
+    filtered = filtered.filter(item => {
+      const searchText = [item.title, item.sku, item.barcode, item.description]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return keywords.some(k => searchText.includes(k));
+    });
+    filteredCount += before - filtered.length;
+  }
+
+  if (filter.includeBarcodes && filter.includeBarcodes.length > 0) {
+    const barcodes = filter.includeBarcodes.map(b => b.toLowerCase());
+    const before = filtered.length;
+    filtered = filtered.filter(item => item.barcode && barcodes.includes(item.barcode.toLowerCase()));
+    filteredCount += before - filtered.length;
+  }
+
+  return { filtered, filteredCount };
+}
+
+export async function importXmlProducts(xml: string, options?: { actorUserId?: string | null; sourceName?: string | null; sourceId?: string | null; signal?: AbortSignal; filter?: XmlImportFilter }) {
   const parsed = parseXmlDocument(xml);
   if (!parsed.ok) {
     return { ok: false, error: { code: 'INVALID_XML', message: parsed.error }, importedCount: 0, updatedCount: 0, items: [] } satisfies XmlImportResult;
+  }
+
+  // İptal kontrolü
+  if (options?.signal?.aborted) {
+    return { ok: false, error: { code: 'CANCELLED', message: 'Senkronizasyon iptal edildi' }, importedCount: 0, updatedCount: 0, items: [] } satisfies XmlImportResult;
   }
 
   const items = parseXmlImportPayload(xml);
@@ -301,6 +467,13 @@ export async function importXmlProducts(xml: string, options?: { actorUserId?: s
     return { ok: true, importedCount: 0, updatedCount: 0, skippedCount: 0, items: [] } satisfies XmlImportResult;
   }
 
+  // Filtreleme uygula
+  const { filtered: filteredItems, filteredCount } = applyImportFilter(items, options?.filter);
+  if (filteredCount > 0) {
+    console.log(`[Import] Filter applied: ${filteredCount} items filtered out, ${filteredItems.length} remaining`);
+  }
+
+  // Kaynağı bul veya oluştur
   let sourceRecord = null as Awaited<ReturnType<typeof prisma.xmlSource.findFirst>> | null;
   if (options?.sourceId) {
     sourceRecord = await prisma.xmlSource.findUnique({ where: { id: options.sourceId } });
@@ -308,193 +481,340 @@ export async function importXmlProducts(xml: string, options?: { actorUserId?: s
     sourceRecord = await prisma.xmlSource.findFirst({ where: { name: options.sourceName } });
   }
 
-  const run = await prisma.xmlImportRun.create({
-    data: {
-      sourceId: sourceRecord?.id ?? (await prisma.xmlSource.create({ data: { name: options?.sourceName ?? 'manual-import', sourceType: 'MANUAL', active: true, scheduleIntervalMinutes: 60 } })).id,
-      status: 'running',
-      totalProducts: items.length,
-    },
-  });
+  const sourceId = sourceRecord?.id;
+  const lockKey = sourceId || 'global';
 
-  const results = [] as Array<{ xmlKey: string; created: boolean; matchedBy?: 'xmlKey' | 'sku'; outcome: string; errorDetail?: string }>;
-  let failedCount = 0;
-  let skippedCount = 0;
+  // Eşzamanlı sync kontrolü - aynı kaynak için ikinci bir sync başlatma
+  if (syncLocks.get(lockKey)) {
+    console.log(`[Import] Sync already in progress for ${options?.sourceName || lockKey}, skipping...`);
+    return { ok: false, error: { code: 'SYNC_IN_PROGRESS', message: 'Bu kaynak için senkronizasyon zaten devam ediyor' }, importedCount: 0, updatedCount: 0, items: [] } satisfies XmlImportResult;
+  }
 
-  for (const item of items) {
-    const existingByXmlKey = item.xmlKey
-      ? await prisma.product.findUnique({ where: { xmlKey: item.xmlKey } })
-      : null;
+  syncLocks.set(lockKey, true);
 
-    const existingBySku = item.sku && !existingByXmlKey
-      ? await prisma.product.findFirst({ where: { sku: item.sku } })
-      : null;
-
-    const existing = existingByXmlKey ?? existingBySku;
-
-    // Kategori ve marka eşleştirme
-    const categoryResult = await findOrCreateCategory(item.category || item.mainCategory || item.topCategory || item.subCategory);
-    const brandResult = await findOrCreateBrand(item.brand);
-
-    // Varyant kontrolü - XML'de varyant bilgisi var mı?
-    const hasVariants = !!(item.sku && item.sku.includes('-'));
-
-    if (existing) {
-      await prisma.product.update({
-        where: { id: existing.id },
-        data: {
-          xmlKey: item.xmlKey,
-          title: item.title,
-          sku: item.sku,
-          barcode: item.barcode,
-          stock: Number.isFinite(item.stock) ? item.stock : 0,
-          minStock: Number.isFinite(item.minStock) ? item.minStock : 0,
-          salePrice: item.price,
-          vatRate: item.tax,
-          description: item.description,
-          images: item.images,
-          categoryId: categoryResult.id,
-          brandId: brandResult.id,
-          categoryMatch: categoryResult.matched,
-          brandMatch: brandResult.matched,
-          variantMatch: hasVariants,
-          status: 'XML',
-          // XML kaynağına bağla - ürünler kalıcı olarak saklansın
-          xmlSourceId: sourceRecord?.id || null,
-        },
-      });
-
-      results.push({
-        xmlKey: item.xmlKey,
-        created: false,
-        matchedBy: existingByXmlKey ? 'xmlKey' : 'sku',
-        outcome: 'updated',
-      });
-      await prisma.xmlImportItemResult.create({
-        data: {
-          importRunId: run.id,
-          xmlKey: item.xmlKey,
-          sku: item.sku ?? null,
-          outcome: 'updated',
-        },
-      });
-      continue;
-    }
-
-    const created = await prisma.product.create({
+  try {
+    const run = await prisma.xmlImportRun.create({
       data: {
-        xmlKey: item.xmlKey,
-        title: item.title,
-        sku: item.sku,
-        barcode: item.barcode,
-        stock: Number.isFinite(item.stock) ? item.stock : 0,
-        minStock: Number.isFinite(item.minStock) ? item.minStock : 0,
-        salePrice: item.price,
-        vatRate: item.tax,
-        description: item.description,
-        images: item.images,
-        categoryId: categoryResult.id,
-        brandId: brandResult.id,
-        categoryMatch: categoryResult.matched,
-        brandMatch: brandResult.matched,
-        variantMatch: hasVariants,
-        status: 'XML',
-        // XML kaynağına bağla - ürünler kalıcı olarak saklansın
-        xmlSourceId: sourceRecord?.id || null,
+        sourceId: sourceRecord?.id ?? (await prisma.xmlSource.create({ data: { name: options?.sourceName ?? 'manual-import', sourceType: 'MANUAL', active: true, scheduleIntervalMinutes: 60 } })).id,
+        status: 'running',
+        totalProducts: items.length,
       },
     });
 
-    // Varyant varsa otomatik oluştur
-    if (hasVariants && item.sku) {
-      const variantParts = item.sku.split('-');
-      if (variantParts.length >= 2) {
-        const variantName = variantParts.slice(0, -1).join('-');
-        const variantValue = variantParts[variantParts.length - 1];
+    const results = [] as Array<{ xmlKey: string; created: boolean; matchedBy?: 'xmlKey' | 'sku'; outcome: string; errorDetail?: string }>;
+    let failedCount = 0;
+    let skippedCount = 0;
+
+    // Kategori ve marka isimlerini önceden yükle
+    const allCategories = await prisma.category.findMany({ select: { id: true, name: true } });
+    const categoryMap = new Map(allCategories.map(c => [c.name.toLowerCase(), c.id]));
+    const allBrands = await prisma.brand.findMany({ select: { id: true, name: true } });
+    const brandMap = new Map(allBrands.map(b => [b.name.toLowerCase(), b.id]));
+
+    // Filtrelenmiş ürünler üzerinde duplicate xmlKey kontrolü
+    const seenXmlKeys = new Set<string>();
+    const uniqueItems = filteredItems.filter(item => {
+      if (seenXmlKeys.has(item.xmlKey)) {
+        skippedCount++;
+        return false;
+      }
+      seenXmlKeys.add(item.xmlKey);
+      return true;
+    });
+
+    // Resim doğrulama
+    let totalImages = 0;
+    let validImageUrls = 0;
+    for (const item of filteredItems) {
+      if (item.images) {
+        const validation = validateImageUrls(item.images);
+        totalImages += validation.totalUrls;
+        validImageUrls += validation.validUrls;
+      }
+    }
+    if (totalImages > 0) {
+      console.log(`[Import] Image validation: ${validImageUrls}/${totalImages} valid URLs`);
+    }
+
+    console.log(`[Import] ${items.length} from XML, ${filteredCount} filtered, ${uniqueItems.length} unique (${skippedCount} duplicates skipped)`);
+
+    // Tüm ürünleri upsert ile ekle/güncelle (batch'ler halinde)
+    for (let i = 0; i < uniqueItems.length; i += BATCH_SIZE) {
+      const batch = uniqueItems.slice(i, i + BATCH_SIZE);
+      const batchResults: typeof results = [];
+      
+      for (const item of batch) {
         try {
-          await prisma.variant.create({
-            data: {
-              name: variantName || 'Varyant',
-              value: variantValue,
-              productId: created.id,
+          // XML'den gelen orijinal kategori yolunu oluştur (örn: "Giyim > Ayakkabı > Spor Ayakkabı")
+          const categoryParts = [item.topCategory, item.mainCategory, item.subCategory, item.category].filter(Boolean);
+          const supplierCategory = categoryParts.length > 0 ? categoryParts.join(' > ') : null;
+
+          // Kategori adı için en spesifik olanı kullan (supplierCategory ile uyumlu)
+          // En detaylı kategori: category > subCategory > mainCategory > topCategory
+          const catName = (item.category || item.subCategory || item.mainCategory || item.topCategory || '').toLowerCase().trim();
+          let categoryId = catName ? categoryMap.get(catName) || null : null;
+          if (!categoryId && catName) {
+            try {
+              const newCat = await prisma.category.create({ data: { name: catName } });
+              categoryId = newCat.id;
+              categoryMap.set(catName, newCat.id);
+            } catch {
+              // Race condition: başka bir işlem aynı kategoriyi oluşturmuş olabilir
+              const existingCat = await prisma.category.findFirst({ where: { name: { equals: catName } } });
+              if (existingCat) {
+                categoryId = existingCat.id;
+                categoryMap.set(catName, existingCat.id);
+              }
+            }
+          }
+
+          const brandName = (item.brand || '').toLowerCase().trim();
+          let brandId = brandName ? brandMap.get(brandName) || null : null;
+          if (!brandId && brandName) {
+            try {
+              const newBrand = await prisma.brand.create({ data: { name: brandName } });
+              brandId = newBrand.id;
+              brandMap.set(brandName, newBrand.id);
+            } catch {
+              const existingBrand = await prisma.brand.findFirst({ where: { name: { equals: brandName } } });
+              if (existingBrand) {
+                brandId = existingBrand.id;
+                brandMap.set(brandName, existingBrand.id);
+              }
+            }
+          }
+
+          const hasVariants = !!(item.sku && item.sku.includes('-'));
+
+          // Prisma upsert kullan - xmlKey unique olduğu için race condition'ları önler
+          const created = await prisma.product.upsert({
+            where: { xmlKey: item.xmlKey },
+            update: {
+              title: item.title,
+              sku: item.sku,
+              barcode: item.barcode,
+              stock: Number.isFinite(item.stock) ? item.stock : 0,
+              minStock: Number.isFinite(item.minStock) ? item.minStock : 0,
+              salePrice: item.price,
+              vatRate: item.tax,
+              description: item.description,
+              images: item.images,
+              link: item.link,
+              unit: item.unit,
+              currency: item.currency,
+              detail: item.detail,
+              categoryId,
+              brandId,
+              supplierCategory,
+              categoryMatch: false, // XML'den gelen kategori sistem kategorisi değil, eşleştirme sayfasında yapılacak
+              brandMatch: false,    // XML'den gelen marka sistem markası değil, eşleştirme sayfasında yapılacak
+              variantMatch: false,  // XML'den gelen varyantlar sistem varyantı değil, eşleştirme sayfasında yapılacak
+              status: 'XML',
+              xmlSourceId: sourceId || null,
+            },
+            create: {
+              xmlKey: item.xmlKey,
+              title: item.title,
+              sku: item.sku,
+              barcode: item.barcode,
+              stock: Number.isFinite(item.stock) ? item.stock : 0,
+              minStock: Number.isFinite(item.minStock) ? item.minStock : 0,
+              salePrice: item.price,
+              vatRate: item.tax,
+              description: item.description,
+              images: item.images,
+              link: item.link,
+              unit: item.unit,
+              currency: item.currency,
+              detail: item.detail,
+              categoryId,
+              brandId,
+              supplierCategory,
+              categoryMatch: false, // XML'den gelen kategori sistem kategorisi değil, eşleştirme sayfasında yapılacak
+              brandMatch: false,    // XML'den gelen marka sistem markası değil, eşleştirme sayfasında yapılacak
+              variantMatch: false,  // XML'den gelen varyantlar sistem varyantı değil, eşleştirme sayfasında yapılacak
+              status: 'XML',
+              xmlSourceId: sourceId || null,
             },
           });
-        } catch {
-          // Varyant zaten varsa hata verme
+
+          // Upsert sonucu: createdAt === updatedAt ise yeni oluşturulmuş
+          const isNew = created.createdAt.getTime() === created.updatedAt.getTime();
+          batchResults.push({ 
+            xmlKey: item.xmlKey, 
+            created: isNew, 
+            outcome: isNew ? 'created' : 'updated' 
+          });
+
+          if (hasVariants && item.sku) {
+            const variantParts = item.sku.split('-');
+            if (variantParts.length >= 2) {
+              const variantName = variantParts.slice(0, -1).join('-');
+              const variantValue = variantParts[variantParts.length - 1];
+              try {
+                await prisma.variant.upsert({
+                  where: {
+                    productId_name_value: {
+                      productId: created.id,
+                      name: variantName || 'Varyant',
+                      value: variantValue,
+                    },
+                  },
+                  update: {},
+                  create: {
+                    name: variantName || 'Varyant',
+                    value: variantValue,
+                    productId: created.id,
+                  },
+                });
+              } catch {
+                // Varyant zaten varsa hata verme
+              }
+            }
+          }
+        } catch (err) {
+          failedCount++;
+          batchResults.push({ xmlKey: item.xmlKey, created: false, outcome: 'failed', errorDetail: String(err) });
         }
+      }
+
+      results.push(...batchResults);
+
+      // Her batch'ten sonra run'ı güncelle
+      await prisma.xmlImportRun.update({
+        where: { id: run.id },
+        data: {
+          newProducts: results.filter(r => r.outcome === 'created').length,
+          updatedProducts: results.filter(r => r.outcome === 'updated').length,
+          failedProducts: failedCount,
+        },
+      });
+
+      // WebSocket ile ilerleme bildirimi
+      broadcast('imports', 'progress', {
+        runId: run.id,
+        sourceName: options?.sourceName || 'manual-import',
+        processed: Math.min(i + BATCH_SIZE, items.length),
+        total: items.length,
+        failed: failedCount,
+        percentage: Math.round((Math.min(i + BATCH_SIZE, items.length) / items.length) * 100),
+      });
+    }
+    
+    const totalImported = results.filter(r => r.outcome === 'created').length;
+    const totalUpdated = results.filter(r => r.outcome === 'updated').length;
+    const finishedAt = new Date();
+    const durationMs = finishedAt.getTime() - run.startedAt.getTime();
+
+    await prisma.xmlImportRun.update({
+      where: { id: run.id },
+      data: {
+        finishedAt,
+        durationMs,
+        status: 'completed',
+        newProducts: totalImported,
+        updatedProducts: totalUpdated,
+        failedProducts: failedCount,
+        skippedProducts: skippedCount,
+      },
+    });
+
+    await prisma.xmlSource.update({
+      where: { id: run.sourceId },
+      data: {
+        lastRunAt: finishedAt,
+        lastSuccessAt: finishedAt,
+        lastError: null,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'xml.import.success',
+        actorUserId: options?.actorUserId ?? null,
+        meta: JSON.stringify({
+          sourceName: options?.sourceName ?? null,
+          importedCount: totalImported,
+          updatedCount: totalUpdated,
+          totalItems: results.length,
+        }),
+      },
+    });
+
+    // Notification oluştur
+    try {
+      await prisma.notification.create({
+        data: {
+          type: 'xml_import',
+          title: `XML İçe Aktarma: ${options?.sourceName || 'Manuel'}`,
+          message: `${totalImported} yeni, ${totalUpdated} güncellendi, ${failedCount} hatalı, ${skippedCount} atlanan (${(durationMs / 1000).toFixed(1)}sn)`,
+        },
+      });
+    } catch (notifError) {
+      console.error('[Import] Notification creation failed:', notifError);
+    }
+
+    // WebSocket ile tamamlandı bildirimi
+    broadcast('imports', 'completed', {
+      runId: run.id,
+      sourceName: options?.sourceName || 'manual-import',
+      importedCount: totalImported,
+      updatedCount: totalUpdated,
+      failedCount,
+      durationMs,
+    });
+
+    console.log(`[Import] Completed: ${totalImported} created, ${totalUpdated} updated, ${failedCount} failed, ${skippedCount} skipped in ${durationMs}ms`);
+
+    // Otomatik varyant analizini tetikle (arka planda)
+    if (options?.sourceId && totalImported > 0) {
+      try {
+        const { analyzeAllProducts } = await import('./variantEngineV2.ts');
+        // Arka planda çalıştır, beklemeye gerek yok
+        analyzeAllProducts(options.sourceId).catch((err: any) =>
+          console.error('[Variant] Auto-analysis error:', err)
+        );
+      } catch (err) {
+        console.error('[Variant] Auto-analysis init error:', err);
       }
     }
 
-    results.push({ xmlKey: item.xmlKey, created: true, outcome: 'created' });
-    await prisma.xmlImportItemResult.create({
-      data: {
-        importRunId: run.id,
-        xmlKey: item.xmlKey,
-        sku: item.sku ?? null,
-        outcome: 'created',
-      },
-    });
+    return {
+      ok: true,
+      importedCount: totalImported,
+      updatedCount: totalUpdated,
+      skippedCount,
+      failedCount,
+      filteredCount,
+      items: results,
+      runId: run.id,
+    } satisfies XmlImportResult;
+  } finally {
+    // Kilidi her durumda serbest bırak
+    syncLocks.delete(lockKey);
   }
-
-  const importedCount = results.filter((item) => item.created).length;
-  const updatedCount = results.filter((item) => !item.created).length;
-  const finishedAt = new Date();
-  const durationMs = finishedAt.getTime() - run.startedAt.getTime();
-
-  await prisma.xmlImportRun.update({
-    where: { id: run.id },
-    data: {
-      finishedAt,
-      durationMs,
-      status: 'completed',
-      newProducts: importedCount,
-      updatedProducts: updatedCount,
-      failedProducts: failedCount,
-      skippedProducts: skippedCount,
-    },
-  });
-
-  await prisma.xmlSource.update({
-    where: { id: run.sourceId },
-    data: {
-      lastRunAt: finishedAt,
-      lastSuccessAt: finishedAt,
-      lastError: null,
-    },
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      action: 'xml.import.success',
-      actorUserId: options?.actorUserId ?? null,
-      meta: JSON.stringify({
-        sourceName: options?.sourceName ?? null,
-        importedCount,
-        updatedCount,
-        totalItems: results.length,
-      }),
-    },
-  });
-
-  return {
-    ok: true,
-    importedCount,
-    updatedCount,
-    skippedCount,
-    failedCount,
-    items: results,
-    runId: run.id,
-  } satisfies XmlImportResult;
 }
 
 export async function fetchXmlFromUrl(url: string) {
-  const response = await fetch(url, { redirect: 'follow' });
-  if (!response.ok) {
-    throw new Error(`XML fetch failed with status ${response.status}`);
-  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
 
-  const text = await response.text();
-  if (!text.trim()) {
-    throw new Error('XML content is empty');
-  }
+  try {
+    const response = await fetch(url, { 
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`XML fetch failed with status ${response.status}`);
+    }
 
-  return text;
+    const text = await response.text();
+    if (!text.trim()) {
+      throw new Error('XML content is empty');
+    }
+
+    return text;
+  } finally {
+    clearTimeout(timeout);
+  }
 }

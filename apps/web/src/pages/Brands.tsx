@@ -1,143 +1,616 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { apiFetch } from '../lib/api';
+import { showToast } from '../components/ui/Toast';
 
-interface BrandItem {
-  id: string;
-  name: string;
-  externalId: string | null;
+interface BrandStats {
+  totalSystemBrands: number; matchedProducts: number; unmatchedProducts: number;
+  totalMappings: number; totalLogs: number;
+  xmlBrandUsage: number; dgBrandUsage: number; customBrandUsage: number;
+  prefixEnabledCount: number;
 }
 
-export default function Brands() {
-  const [brands, setBrands] = useState<BrandItem[]>([]);
+interface BrandItem {
+  id: string; name: string; externalId: string | null;
+  logo: string | null; prefixEnabled: boolean; prefixFormat: string;
+  isActive: boolean; productCount: number; mappingCount: number;
+}
+
+interface XmlBrand { name: string; sourceName: string; sourceId: string | null; }
+interface MappingItem {
+  id: string; xmlBrandName: string; dgBrandId: string; dgBrandName: string;
+  dgBrandLogo: string | null; confidence: number | null;
+  isAuto: boolean; productCount: number; createdAt: string;
+}
+interface BrandLogItem { id: string; action: string; xmlBrandName: string | null; dgBrandName: string | null; oldValue: string | null; newValue: string | null; prefixChanged: boolean; productCount: number; details: string | null; actorUserId: string | null; createdAt: string; }
+
+type PageTab = 'brands' | 'mappings' | 'logs';
+
+export default function BrandIntelligenceV6() {
+  const [stats, setStats] = useState<BrandStats | null>(null);
+  const [systemBrands, setSystemBrands] = useState<BrandItem[]>([]);
+  const [xmlBrands, setXmlBrands] = useState<XmlBrand[]>([]);
+  const [mappings, setMappings] = useState<MappingItem[]>([]);
+  const [logs, setLogs] = useState<BrandLogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<PageTab>('brands');
+
+  // Filters
+  const [xmlSearch, setXmlSearch] = useState('');
+  const [sysSearch, setSysSearch] = useState('');
+  const [usageFilter, setUsageFilter] = useState('');
+
+  // Selection
+  const [selectedXmlBrand, setSelectedXmlBrand] = useState<string | null>(null);
+  const [selectedSysId, setSelectedSysId] = useState<string | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+
+  // Modal
   const [showModal, setShowModal] = useState(false);
   const [editingBrand, setEditingBrand] = useState<BrandItem | null>(null);
-  const [name, setName] = useState('');
-  const [externalId, setExternalId] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formLogo, setFormLogo] = useState('');
+  const [formPrefix, setFormPrefix] = useState(false);
+  const [formPrefixFormat, setFormPrefixFormat] = useState('MARKA\u00ae {title}');
+  const [formExternalId, setFormExternalId] = useState('');
 
-  useEffect(() => { fetchBrands(); }, []);
+  // Prefix preview
+  const [previewData, setPreviewData] = useState<{ originalTitle: string; computedTitle: string } | null>(null);
 
-  async function fetchBrands() {
+  // Detail panel
+  const [detailInfo, setDetailInfo] = useState<{ type: string; data: any } | null>(null);
+
+  // AI running
+  const [aiRunning, setAiRunning] = useState(false);
+
+  // ==================== FETCH ====================
+  async function fetchAll() {
+    setLoading(true);
     try {
-      const response = await fetch('/brands', { credentials: 'include' });
-      const data = await response.json();
-      setBrands(data.items || []);
-    } catch (error) {
-      console.error('Error fetching brands:', error);
-    } finally {
-      setLoading(false);
-    }
+      const [statsRes, sysRes, xmlRes, mapRes, logRes] = await Promise.all([
+        apiFetch<BrandStats>('/brands/stats'),
+        apiFetch<{ items: BrandItem[] }>('/brands'),
+        apiFetch<{ items: XmlBrand[] }>('/brands/xml-brands'),
+        apiFetch<{ items: MappingItem[] }>('/brands/mappings'),
+        apiFetch<{ items: BrandLogItem[] }>('/brands/logs?limit=20'),
+      ]);
+      if (statsRes.ok && statsRes.data) setStats(statsRes.data);
+      if (sysRes.ok && sysRes.data) setSystemBrands(sysRes.data.items || []);
+      if (xmlRes.ok && xmlRes.data) setXmlBrands(xmlRes.data.items || []);
+      if (mapRes.ok && mapRes.data) setMappings(mapRes.data.items || []);
+      if (logRes.ok && logRes.data) setLogs(logRes.data.items || []);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  useEffect(() => { fetchAll(); }, []);
+
+  // ==================== HANDLERS ====================
+
+  async function handleCreateBrand(e: React.FormEvent) {
     e.preventDefault();
     try {
       const url = editingBrand ? `/brands/${editingBrand.id}` : '/brands';
       const method = editingBrand ? 'PUT' : 'POST';
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name, externalId: externalId || undefined }),
+      const res = await apiFetch(url, {
+        method, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: formName, externalId: formExternalId || undefined, logo: formLogo || undefined, prefixEnabled: formPrefix, prefixFormat: formPrefixFormat }),
       });
-      if (response.ok) {
-        setShowModal(false);
-        setEditingBrand(null);
-        setName('');
-        setExternalId('');
-        fetchBrands();
-      }
-    } catch (error) {
-      console.error('Error saving brand:', error);
-    }
+      if (res.ok) { setShowModal(false); setEditingBrand(null); resetForm(); fetchAll(); showToast('success', editingBrand ? 'Marka güncellendi' : 'Marka oluşturuldu'); }
+      else showToast('error', res.error?.message || 'İşlem başarısız');
+    } catch (err) { console.error(err); }
   }
+
+  function resetForm() { setFormName(''); setFormLogo(''); setFormPrefix(false); setFormPrefixFormat('MARKA\u00ae {title}'); setFormExternalId(''); }
 
   async function handleDelete(id: string) {
-    if (!confirm('Bu markayı silmek istediğinizden emin misiniz?')) return;
-    try {
-      await fetch(`/brands/${id}`, { method: 'DELETE', credentials: 'include' });
-      fetchBrands();
-    } catch (error) {
-      console.error('Error deleting brand:', error);
-    }
+    if (!confirm('Markayı silmek istediğinizden emin misiniz?')) return;
+    try { await apiFetch(`/brands/${id}`, { method: 'DELETE' }); fetchAll(); showToast('success', 'Marka silindi'); }
+    catch (err) { console.error(err); }
   }
 
+  async function handleMatch(xmlBrandName: string, dgBrandId: string) {
+    try {
+      const res = await apiFetch<{ message: string }>('/brands/match', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xmlBrandName, dgBrandId }),
+      });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      else showToast('error', res.error?.message || 'Eşleştirme başarısız');
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleUnmatch(xmlBrandName: string) {
+    if (!confirm(`${xmlBrandName} eşleştirmesini kaldırmak istediğinizden emin misiniz?`)) return;
+    try {
+      const res = await apiFetch<{ message: string }>('/brands/unmatch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xmlBrandName }),
+      });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      else showToast('error', res.error?.message || 'İşlem başarısız');
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleAiMatch() {
+    setAiRunning(true);
+    try {
+      const res = await apiFetch<any>('/brands/ai-match', { method: 'POST', body: JSON.stringify({}) });
+      if (res.ok && res.data) showToast('success', `AI: ${res.data.message}`);
+      else showToast('error', res.error?.message || 'AI eşleştirme başarısız');
+      fetchAll();
+    } catch (err) { console.error(err); }
+    finally { setAiRunning(false); }
+  }
+
+  async function handlePrefixApply() {
+    try {
+      const res = await apiFetch<any>('/brands/prefix/apply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allProducts: true }),
+      });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      else showToast('error', res.error?.message || 'Ön ek uygulanamadı');
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handlePrefixRemove() {
+    try {
+      const res = await apiFetch<any>('/brands/prefix/remove', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allProducts: true }),
+      });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      else showToast('error', res.error?.message || 'Ön ek kaldırılamadı');
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleUseXmlBrand() {
+    try {
+      const res = await apiFetch<any>('/brands/use-xml-brand', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allProducts: true }),
+      });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleUseDgBrand() {
+    try {
+      const res = await apiFetch<any>('/brands/use-dg-brand', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allProducts: true }),
+      });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleUndo(logId: string) {
+    if (!confirm('Bu işlemi geri almak istediğinizden emin misiniz?')) return;
+    try {
+      const res = await apiFetch<any>(`/brands/undo/${logId}`, { method: 'POST' });
+      if (res.ok && res.data) showToast('success', res.data.message);
+      else showToast('error', res.error?.message || 'Geri alma başarısız');
+      fetchAll();
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleExport() {
+    try {
+      const res = await apiFetch<any>('/brands/export');
+      if (res.ok && res.data) {
+        const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `brands-export-${new Date().toISOString().slice(0,10)}.json`; a.click();
+        URL.revokeObjectURL(url);
+        showToast('success', 'Markalar dışa aktarıldı');
+      }
+    } catch (err) { console.error(err); }
+  }
+
+  // ==================== FILTERS ====================
+
+  const filteredXmlBrands = xmlBrands.filter(b => !xmlSearch || b.name.toLowerCase().includes(xmlSearch.toLowerCase()));
+  const filteredSysBrands = systemBrands.filter(b => !sysSearch || b.name.toLowerCase().includes(sysSearch.toLowerCase()));
+  const unmatchedXmlBrands = filteredXmlBrands.filter(xb => !mappings.some(m => m.xmlBrandName === xb.name));
+  const mappedXmlBrands = filteredXmlBrands.filter(xb => mappings.some(m => m.xmlBrandName === xb.name));
+
+  // ==================== PREFIX PREVIEW ====================
+
+  const getPrefixPreview = useMemo(() => {
+    if (!selectedXmlBrand && !selectedSysId) return null;
+    const brand = selectedSysId ? systemBrands.find(b => b.id === selectedSysId) : null;
+    if (!brand) return null;
+    return { format: brand.prefixFormat, brandName: brand.name, example: brand.prefixFormat.replace('{title}', 'Air Max 90').replace('MARKA', brand.name) };
+  }, [selectedXmlBrand, selectedSysId, systemBrands]);
+
+  // ==================== RENDER ====================
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-white">Marka Eşleştir</h2>
-          <p className="text-sm text-slate-400">XML markalarını sistem markalarıyla eşleştirin</p>
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <span>🏷️</span> Brand Intelligence Engine
+            <span className="text-xs bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-full font-normal">V6.0</span>
+          </h2>
+          <p className="text-sm text-slate-400">XML Marka Yönetimi · DG STOK Marka Havuzu · Ön Ek Sistemi · AI Eşleştirme</p>
         </div>
-        <button onClick={() => { setEditingBrand(null); setName(''); setExternalId(''); setShowModal(true); }}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
-          + Yeni Marka
+      </div>
+
+      {/* ACTION BAR */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 p-2.5 backdrop-blur-sm">
+        <button onClick={() => { setEditingBrand(null); resetForm(); setShowModal(true); }} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">+ Yeni Marka</button>
+        <button onClick={handleExport} className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600">📤 Dışa Aktar</button>
+        <div className="w-px h-5 bg-slate-600" />
+        <button onClick={handleAiMatch} disabled={aiRunning} className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:opacity-50">
+          {aiRunning ? '⏳' : '🤖'} AI Eşleştir
         </button>
+        <div className="w-px h-5 bg-slate-600" />
+        <button onClick={handleUseXmlBrand} className="rounded-lg bg-yellow-600/20 px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-600/30">📂 XML Markası Kullan</button>
+        <button onClick={handleUseDgBrand} className="rounded-lg bg-green-600/20 px-3 py-1.5 text-xs text-green-400 hover:bg-green-600/30">🏷️ DG Markası Kullan</button>
+        <div className="w-px h-5 bg-slate-600" />
+        <button onClick={handlePrefixApply} className="rounded-lg bg-cyan-600/20 px-3 py-1.5 text-xs text-cyan-400 hover:bg-cyan-600/30">🔤 Ön Ek Uygula</button>
+        <button onClick={handlePrefixRemove} className="rounded-lg bg-red-600/20 px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/30">🚫 Ön Ek Kaldır</button>
+        <button onClick={() => fetchAll()} className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600">🔄</button>
       </div>
 
-      <div className="rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm">
-        {loading ? (
-          <div className="flex items-center justify-center p-8 text-slate-400">Yükleniyor...</div>
-        ) : brands.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 text-slate-400">
-            <div className="text-4xl mb-2">🏷️</div>
-            <div>Henüz marka yok</div>
+      {/* KPI CARDS */}
+      {stats && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          <KpiCard title="DG STOK Marka" value={stats.totalSystemBrands} color="blue" />
+          <KpiCard title="Eşleşen Ürün" value={stats.matchedProducts} color="green" />
+          <KpiCard title="Eşleşmeyen" value={stats.unmatchedProducts} color="yellow" />
+          <KpiCard title="XML Kullanım" value={stats.xmlBrandUsage} color="blue" />
+          <KpiCard title="DG Kullanım" value={stats.dgBrandUsage} color="green" />
+          <KpiCard title="Ön Ek Aktif" value={stats.prefixEnabledCount} color="cyan" />
+          <KpiCard title="Eşleştirme" value={stats.totalMappings} color="purple" />
+          <KpiCard title="Log" value={stats.totalLogs} color="slate" />
+        </div>
+      )}
+
+      {/* TABS */}
+      <div className="flex gap-1 rounded-xl border border-slate-700 bg-slate-800/50 p-1">
+        {[
+          { key: 'brands' as PageTab, label: '🏷️ Marka Yönetimi', desc: 'Marka eşleştirme ve ön ek' },
+          { key: 'mappings' as PageTab, label: '🔗 Eşleştirmeler', desc: 'XML → DG STOK mapping' },
+          { key: 'logs' as PageTab, label: '📝 İşlem Logları', desc: 'Tüm marka işlem geçmişi' },
+        ].map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${activeTab === tab.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            title={tab.desc}>{tab.label}</button>
+        ))}
+      </div>
+
+      {/* ==================== TAB 1: MARKA YÖNETİMİ ==================== */}
+      {activeTab === 'brands' && (
+        <div className="flex gap-4 h-[calc(100vh-420px)]">
+          {/* SOL: XML Markaları */}
+          <div className="w-72 shrink-0 rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm flex flex-col">
+            <div className="p-3 border-b border-slate-700">
+              <h3 className="text-sm font-semibold text-slate-300 mb-2">📂 XML Markaları</h3>
+              <input type="text" value={xmlSearch} onChange={(e) => setXmlSearch(e.target.value)}
+                placeholder="XML marka ara..." className="w-full rounded-lg border border-slate-600 bg-slate-700 px-2.5 py-1.5 text-xs text-white placeholder-slate-400" />
+              <div className="flex gap-2 mt-2 text-[10px] text-slate-500">
+                <span>{unmatchedXmlBrands.length} eşleşmemiş</span>
+                <span>{mappedXmlBrands.length} eşleşmiş</span>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+              {unmatchedXmlBrands.length === 0 && mappedXmlBrands.length === 0 ? (
+                <div className="text-sm text-slate-500 text-center p-4">XML markası bulunamadı</div>
+              ) : (
+                <>
+                  {unmatchedXmlBrands.length > 0 && <div className="text-[10px] text-slate-500 px-2 py-1 uppercase">Eşleşmemiş</div>}
+                  {unmatchedXmlBrands.map((b) => (
+                    <div key={b.name} onClick={() => { setSelectedXmlBrand(b.name); setDetailInfo({ type: 'xml_brand', data: b }); }}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors ${selectedXmlBrand === b.name ? 'bg-blue-600/20 text-blue-300' : 'hover:bg-slate-700/50 text-slate-300'}`}>
+                      <span className="truncate flex-1">{b.name}</span>
+                      <span className="text-[10px] text-slate-500 ml-1">{b.sourceName}</span>
+                    </div>
+                  ))}
+                  {mappedXmlBrands.length > 0 && <div className="text-[10px] text-slate-500 px-2 py-1 uppercase mt-2">Eşleşmiş</div>}
+                  {mappedXmlBrands.map((b) => {
+                    const m = mappings.find(m => m.xmlBrandName === b.name);
+                    return (
+                      <div key={b.name} onClick={() => { setSelectedXmlBrand(b.name); setDetailInfo({ type: 'xml_brand', data: b }); }}
+                        className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors ${selectedXmlBrand === b.name ? 'bg-green-600/20 text-green-300' : 'hover:bg-slate-700/50 text-slate-300'}`}>
+                        <span className="truncate flex-1">{b.name}</span>
+                        <span className="text-[10px] text-green-400 ml-1">→ {m?.dgBrandName || '?'}</span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-slate-700/50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Marka Adı</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Dış ID</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-300">İşlemler</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {brands.map((brand) => (
-                  <tr key={brand.id} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors">
-                    <td className="px-4 py-3 font-medium text-white">{brand.name}</td>
-                    <td className="px-4 py-3 text-sm text-slate-400">{brand.externalId || '-'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button onClick={() => { setEditingBrand(brand); setName(brand.name); setExternalId(brand.externalId || ''); setShowModal(true); }}
-                        className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Düzenle">✏️</button>
-                      <button onClick={() => handleDelete(brand.id)}
-                        className="rounded-lg p-2 text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors" title="Sil">🗑️</button>
-                    </td>
+
+          {/* ORTA: DG STOK Markaları */}
+          <div className="w-72 shrink-0 rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm flex flex-col">
+            <div className="p-3 border-b border-slate-700">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-slate-300">🏷️ DG STOK Markaları</h3>
+                <button onClick={() => { setEditingBrand(null); resetForm(); setShowModal(true); }}
+                  className="rounded-lg bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700">+ Yeni</button>
+              </div>
+              <input type="text" value={sysSearch} onChange={(e) => setSysSearch(e.target.value)}
+                placeholder="Marka ara..." className="w-full rounded-lg border border-slate-600 bg-slate-700 px-2.5 py-1.5 text-xs text-white placeholder-slate-400" />
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+              {filteredSysBrands.length === 0 ? (
+                <div className="text-sm text-slate-500 text-center p-4">Henüz marka yok</div>
+              ) : (
+                filteredSysBrands.map((b) => (
+                  <div key={b.id} onClick={() => { setSelectedSysId(b.id); setDetailInfo({ type: 'system_brand', data: b }); }}
+                    className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-xs transition-colors group ${selectedSysId === b.id ? 'bg-green-600/20 text-green-300' : 'hover:bg-slate-700/50 text-slate-300'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="truncate">{b.name}</span>
+                      <span className="text-[10px] text-slate-500">({b.productCount})</span>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                      {b.prefixEnabled && <span className="text-[10px] text-cyan-400" title={`Ön ek: ${b.prefixFormat}`}>🔤</span>}
+                      <button onClick={(e) => { e.stopPropagation(); setEditingBrand(b); setFormName(b.name); setFormLogo(b.logo || ''); setFormExternalId(b.externalId || ''); setFormPrefix(b.prefixEnabled); setFormPrefixFormat(b.prefixFormat); setShowModal(true); }} className="text-[10px] text-slate-400 hover:text-white">✏️</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* SAĞ: Detay + Ön İzleme */}
+          <div className="flex-1 rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm p-4 overflow-y-auto">
+            {detailInfo?.type === 'xml_brand' ? (
+              <div className="space-y-4">
+                <h4 className="text-base font-semibold text-white">📂 XML Marka: {detailInfo.data.name}</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-slate-400">XML Marka:</span> <span className="text-white ml-1">{detailInfo.data.name}</span></div>
+                  <div><span className="text-slate-400">Kaynak:</span> <span className="text-white ml-1">{detailInfo.data.sourceName}</span></div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">🏷️ DG STOK Markası Seç</label>
+                  <div className="flex gap-2">
+                    <select value={selectedSysId || ''} onChange={(e) => setSelectedSysId(e.target.value || null)}
+                      className="flex-1 rounded-lg border border-slate-600 bg-slate-700 px-2.5 py-1.5 text-sm text-white">
+                      <option value="">Marka seç...</option>
+                      {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name} ({b.productCount})</option>)}
+                    </select>
+                  </div>
+                </div>
+                {selectedSysId && (
+                  <div className="flex gap-2">
+                    <button onClick={() => handleMatch(detailInfo.data.name, selectedSysId)}
+                      className="flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">🔗 Eşleştir</button>
+                    <button onClick={() => handleUnmatch(detailInfo.data.name)}
+                      className="rounded-lg bg-red-600/20 px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/30">Eşleştirmeyi Kaldır</button>
+                  </div>
+                )}
+                {/* Ön İzleme */}
+                {getPrefixPreview && (
+                  <div className="rounded-lg bg-slate-700/30 p-3 border border-slate-600/50">
+                    <div className="text-xs text-slate-400 mb-2">🔤 Ön Ek Önizleme</div>
+                    <div className="text-xs text-slate-400">Format: <code className="text-cyan-400">{getPrefixPreview.format}</code></div>
+                    <div className="mt-2 p-2 rounded bg-slate-700/50">
+                      <div className="text-xs text-slate-500">XML: <span className="text-slate-300">Air Max 90</span></div>
+                      <div className="text-xs text-slate-500 mt-1">↓</div>
+                      <div className="text-xs text-green-400 font-medium mt-1">{getPrefixPreview.example}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : detailInfo?.type === 'system_brand' ? (
+              <div className="space-y-4">
+                <h4 className="text-base font-semibold text-white">🏷️ {detailInfo.data.name}</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-slate-400">Ürün:</span> <span className="text-white ml-1">{detailInfo.data.productCount}</span></div>
+                  <div><span className="text-slate-400">Eşleştirme:</span> <span className="text-white ml-1">{detailInfo.data.mappingCount}</span></div>
+                  <div><span className="text-slate-400">Ön Ek:</span> <span className={`ml-1 ${detailInfo.data.prefixEnabled ? 'text-green-400' : 'text-slate-400'}`}>{detailInfo.data.prefixEnabled ? '✅ Aktif' : '❌ Pasif'}</span></div>
+                  {detailInfo.data.prefixEnabled && <div><span className="text-slate-400">Format:</span> <code className="text-cyan-400 ml-1 text-[10px]">{detailInfo.data.prefixFormat}</code></div>}
+                  <div><span className="text-slate-400">Durum:</span> <span className={`ml-1 ${detailInfo.data.isActive ? 'text-green-400' : 'text-red-400'}`}>{detailInfo.data.isActive ? 'Aktif' : 'Pasif'}</span></div>
+                </div>
+                {/* Ön İzleme */}
+                {detailInfo.data.prefixEnabled && (
+                  <div className="rounded-lg bg-slate-700/30 p-3 border border-slate-600/50">
+                    <div className="text-xs text-slate-400 mb-1">🔤 Ön Ek Önizleme</div>
+                    <div className="p-2 rounded bg-slate-700/50">
+                      <div className="text-xs text-slate-500">XML: <span className="text-slate-300">Air Max 90</span></div>
+                      <div className="text-xs text-slate-500 mt-1">↓</div>
+                      <div className="text-xs text-green-400 font-medium mt-1">{detailInfo.data.prefixFormat.replace('{title}', 'Air Max 90').replace('MARKA', detailInfo.data.name)}</div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => { setEditingBrand(detailInfo.data); setFormName(detailInfo.data.name); setFormLogo(detailInfo.data.logo || ''); setFormExternalId(detailInfo.data.externalId || ''); setFormPrefix(detailInfo.data.prefixEnabled); setFormPrefixFormat(detailInfo.data.prefixFormat); setShowModal(true); }}
+                    className="rounded-lg bg-yellow-600/20 px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-600/30">✏️ Düzenle</button>
+                  <button onClick={() => handleDelete(detailInfo.data.id)}
+                    className="rounded-lg bg-red-600/20 px-3 py-1.5 text-xs text-red-400 hover:bg-red-600/30">🗑️ Sil</button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-slate-500 text-center py-8 flex flex-col items-center gap-2">
+                <span className="text-3xl">🏷️</span>
+                <span>Bir XML veya DG STOK markası seçin</span>
+                <span className="text-xs text-slate-600">Detaylar, ön izleme ve eşleştirme işlemleri burada görünecek</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== TAB 2: EŞLEŞTİRMELER ==================== */}
+      {activeTab === 'mappings' && (
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm">
+          {mappings.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 text-slate-400">
+              <div className="text-4xl mb-2">🔗</div>
+              <div>Henüz eşleştirme yok</div>
+              <p className="text-xs text-slate-500 mt-1">XML markalarını DG STOK markalarına eşleştirmek için "Marka Yönetimi" sekmesini kullanın</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-700/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">XML Markası</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">DG STOK Markası</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Güven</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Tip</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Ürün</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Tarih</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {mappings.map(m => (
+                    <tr key={m.id} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors text-sm">
+                      <td className="px-4 py-3 text-white">{m.xmlBrandName}</td>
+                      <td className="px-4 py-3 text-green-400">{m.dgBrandName}</td>
+                      <td className="px-4 py-3">{m.confidence != null ? <span className="text-purple-400">%{Math.round(m.confidence)}</span> : <span className="text-slate-500">—</span>}</td>
+                      <td className="px-4 py-3">{m.isAuto ? <span className="text-cyan-400">🤖 AI</span> : <span className="text-blue-400">👤 Manuel</span>}</td>
+                      <td className="px-4 py-3 text-slate-300">{m.productCount}</td>
+                      <td className="px-4 py-3 text-slate-400 text-xs">{new Date(m.createdAt).toLocaleDateString('tr-TR')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
+      {/* ==================== TAB 3: LOGLAR ==================== */}
+      {activeTab === 'logs' && (
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm">
+          {logs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-8 text-slate-400">
+              <div className="text-4xl mb-2">📝</div>
+              <div>Henüz işlem kaydı yok</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-700/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">İşlem</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">XML Marka</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">DG Marka</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Ürün</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Ön Ek</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Tarih</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300">İşlem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {logs.map(log => (
+                    <tr key={log.id} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors text-sm">
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                          log.action === 'BRAND_MATCH' ? 'bg-green-500/10 text-green-400' :
+                          log.action === 'BRAND_UNMATCH' ? 'bg-red-500/10 text-red-400' :
+                          log.action === 'PREFIX_APPLY' ? 'bg-cyan-500/10 text-cyan-400' :
+                          log.action === 'PREFIX_REMOVE' ? 'bg-orange-500/10 text-orange-400' :
+                          log.action === 'AI_MATCH' ? 'bg-purple-500/10 text-purple-400' :
+                          log.action === 'UNDO' ? 'bg-yellow-500/10 text-yellow-400' :
+                          'bg-slate-500/10 text-slate-400'
+                        }`}>{log.action}</span>
+                      </td>
+                      <td className="px-4 py-3 text-white">{log.xmlBrandName || '-'}</td>
+                      <td className="px-4 py-3 text-green-400">{log.dgBrandName || '-'}</td>
+                      <td className="px-4 py-3 text-slate-300">{log.productCount}</td>
+                      <td className="px-4 py-3">{log.prefixChanged ? <span className="text-cyan-400">✅</span> : <span className="text-slate-500">—</span>}</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">{new Date(log.createdAt).toLocaleString('tr-TR')}</td>
+                      <td className="px-4 py-3 text-right">
+                        {log.action !== 'UNDO' && (
+                          <button onClick={() => handleUndo(log.id)} className="text-xs text-yellow-400 hover:text-yellow-300">↩ Geri Al</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CREATE/EDIT MODAL */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-white mb-4">{editingBrand ? 'Marka Düzenle' : 'Yeni Marka'}</h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowModal(false)}>
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-4">{editingBrand ? 'Marka Düzenle' : 'Yeni Marka Oluştur'}</h3>
+            <form onSubmit={handleCreateBrand} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Marka Adı</label>
-                <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none" required />
+                <label className="block text-sm font-medium text-slate-300 mb-1">Marka Adı *</label>
+                <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white" required />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Dış ID (Opsiyonel)</label>
-                <input type="text" value={externalId} onChange={(e) => setExternalId(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none" />
+                <label className="block text-sm font-medium text-slate-300 mb-1">Logo URL</label>
+                <input type="text" value={formLogo} onChange={(e) => setFormLogo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white" placeholder="https://..." />
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex items-center gap-3">
+                <input type="checkbox" checked={formPrefix} onChange={(e) => setFormPrefix(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-700 text-blue-600" id="prefixToggle" />
+                <label htmlFor="prefixToggle" className="text-sm text-slate-300">Ön ek kullan</label>
+              </div>
+              {formPrefix && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">Ön Ek Formatı</label>
+                  <select value={formPrefixFormat} onChange={(e) => setFormPrefixFormat(e.target.value)}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+                    <option value="MARKA\u00ae {title}">MARKA® Ürün Adı</option>
+                    <option value="MARKA {title}">MARKA Ürün Adı</option>
+                    <option value="[MARKA] {title}">[MARKA] Ürün Adı</option>
+                    <option value="MARKA - {title}">MARKA - Ürün Adı</option>
+                    <option value="MARKA | {title}">MARKA | Ürün Adı</option>
+                  </select>
+                  {formName && (
+                    <div className="mt-2 p-2 rounded bg-slate-700/50 text-xs">
+                      <span className="text-slate-500">Önizleme: </span>
+                      <span className="text-green-400">{formPrefixFormat.replace('{title}', 'Air Max 90').replace('MARKA', formName)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Dış ID</label>
+                <input type="text" value={formExternalId} onChange={(e) => setFormExternalId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white" />
+              </div>
+              <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setShowModal(false)}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors">İptal</button>
+                  className="rounded-lg bg-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-600">İptal</button>
                 <button type="submit"
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
-                  {editingBrand ? 'Güncelle' : 'Oluştur'}
-                </button>
+                  className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700">{editingBrand ? 'Güncelle' : 'Oluştur'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ==================== KPI CARD ====================
+function KpiCard({ title, value, color }: { title: string; value: number; color: string }) {
+  const colorMap: Record<string, string> = {
+    blue: 'border-blue-500/20 bg-blue-500/10 text-blue-400',
+    green: 'border-green-500/20 bg-green-500/10 text-green-400',
+    yellow: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-400',
+    purple: 'border-purple-500/20 bg-purple-500/10 text-purple-400',
+    cyan: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
+    red: 'border-red-500/20 bg-red-500/10 text-red-400',
+    slate: 'border-slate-500/20 bg-slate-500/10 text-slate-400',
+    teal: 'border-teal-500/20 bg-teal-500/10 text-teal-400',
+  };
+  return (
+    <div className={`rounded-xl border p-3 backdrop-blur-sm ${colorMap[color] || colorMap.blue}`}>
+      <div className="text-xs opacity-70">{title}</div>
+      <div className="text-lg font-semibold">{value.toLocaleString('tr-TR')}</div>
     </div>
   );
 }

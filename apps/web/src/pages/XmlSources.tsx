@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { apiFetch } from '../lib/api';
 
 // ==================== TYPES ====================
 interface XmlSourceItem {
@@ -19,6 +20,11 @@ interface XmlSourceItem {
   purchasePriceVatStatus: string;
   purchasePriceField: string | null;
   productCount: number;
+  lastRunStatus: string | null;
+  lastRunDurationMs: number | null;
+  lastNewProducts: number;
+  lastUpdatedProducts: number;
+  lastFailedProducts: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -140,13 +146,14 @@ export default function XmlSources() {
   const [editingSource, setEditingSource] = useState<XmlSourceItem | null>(null);
   const [formData, setFormData] = useState({
     name: '', company: '', sourceType: 'MANUAL', url: '', username: '', password: '',
-    currency: 'TRY', vatRate: 20, active: true, scheduleIntervalMinutes: 60,
+    currency: 'TRY', vatRate: 20, active: true, scheduleIntervalMinutes: 60, cronExpression: '',
     purchasePriceVatStatus: 'dahil', purchasePriceField: '',
     updateStock: true, updatePrice: true, updateImages: true,
   });
   const [message, setMessage] = useState('');
   const [syncingIds, setSyncingIds] = useState<Record<string, boolean>>({});
   const [testingIds, setTestingIds] = useState<Record<string, boolean>>({});
+  const [batchSyncing, setBatchSyncing] = useState(false);
 
   // Products state
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
@@ -191,7 +198,7 @@ export default function XmlSources() {
     if (selectedSourceId && activeTab === 'urunler') {
       fetchSourceProducts();
     }
-  }, [selectedSourceId, productPagination.page, productSearch, pageSize]);
+  }, [selectedSourceId, activeTab, productPagination.page, productSearch, pageSize]);
 
   useEffect(() => {
     if (selectedSourceId) {
@@ -208,7 +215,7 @@ export default function XmlSources() {
   // ==================== API CALLS ====================
   async function fetchSources() {
     try {
-      const response = await fetch('/xml-sources', { credentials: 'include' });
+      const response = await apiFetch('/xml-sources');
       const data = await response.json();
       setSources(data.items || []);
       if (data.items?.length > 0 && !selectedSourceId) {
@@ -231,7 +238,7 @@ export default function XmlSources() {
       });
       if (productSearch) params.append('search', productSearch);
 
-      const response = await fetch(`/xml-sources/${selectedSourceId}/products?${params}`, { credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${selectedSourceId}/products?${params}`);
       const data = await response.json();
       setSourceProducts(data.items || []);
       setProductPagination(data.pagination || { ...productPagination, limit: pageSize });
@@ -244,7 +251,7 @@ export default function XmlSources() {
 
   async function fetchHistory(sourceId: string) {
     try {
-      const response = await fetch(`/xml-sources/${sourceId}/history`, { credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${sourceId}/history`);
       const data = await response.json();
       setSelectedSourceHistory(data.items || []);
       setShowHistory(true);
@@ -257,7 +264,7 @@ export default function XmlSources() {
     if (!selectedSourceId) return;
     setFieldsLoading(true);
     try {
-      const response = await fetch(`/xml-sources/${selectedSourceId}/fields`, { credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${selectedSourceId}/fields`);
       const data = await response.json();
       setXmlFields(data.fields || []);
       setFieldMapping(data.mapping || {});
@@ -272,7 +279,7 @@ export default function XmlSources() {
   async function loadPricingRules() {
     if (!selectedSourceId) return;
     try {
-      const response = await fetch(`/xml-sources/${selectedSourceId}`, { credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${selectedSourceId}`);
       const data = await response.json();
       if (data.pricingRules) {
         try { setPricingRules(JSON.parse(data.pricingRules)); } catch {}
@@ -291,7 +298,7 @@ export default function XmlSources() {
     try {
       const url = editingSource ? `/xml-sources/${editingSource.id}` : '/xml-sources';
       const method = editingSource ? 'PUT' : 'POST';
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -301,7 +308,7 @@ export default function XmlSources() {
         setMessage('✅ Başarılı');
         setShowModal(false);
         setEditingSource(null);
-        setFormData({ name: '', company: '', sourceType: 'MANUAL', url: '', username: '', password: '', currency: 'TRY', vatRate: 20, active: true, scheduleIntervalMinutes: 60, purchasePriceVatStatus: 'dahil', purchasePriceField: '', updateStock: true, updatePrice: true, updateImages: true });
+        setFormData({ name: '', company: '', sourceType: 'MANUAL', url: '', username: '', password: '', currency: 'TRY', vatRate: 20, active: true, scheduleIntervalMinutes: 60, cronExpression: '', purchasePriceVatStatus: 'dahil', purchasePriceField: '', updateStock: true, updatePrice: true, updateImages: true });
         fetchSources();
       } else {
         const data = await response.json();
@@ -315,7 +322,7 @@ export default function XmlSources() {
   async function handleDelete(id: string) {
     if (!confirm('Bu XML kaynağını silmek istediğinizden emin misiniz?')) return;
     try {
-      const response = await fetch(`/xml-sources/${id}`, { method: 'DELETE', credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${id}`, { method: 'DELETE', });
       if (response.ok) {
         fetchSources();
         if (selectedSourceId === id) { setSelectedSourceId(null); setSourceProducts([]); }
@@ -330,7 +337,7 @@ export default function XmlSources() {
   async function handleSync(id: string) {
     setSyncingIds((prev) => ({ ...prev, [id]: true }));
     try {
-      const response = await fetch(`/xml-sources/${id}/sync`, { method: 'POST', credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${id}/sync`, { method: 'POST', });
       if (response.ok) {
         const data = await response.json();
         alert(`Sync tamamlandı! ${data.importedCount} yeni, ${data.updatedCount} güncellendi`);
@@ -347,10 +354,61 @@ export default function XmlSources() {
     }
   }
 
+  async function handleAnalyze(id: string) {
+    try {
+      const response = await apiFetch(`/xml-sources/${id}/analyze`, { method: 'POST' });
+      const data = await response.json();
+      if (data.ok && data.analysis) {
+        const a = data.analysis;
+        alert(
+          `📊 XML Analiz Sonucu\n\n` +
+          `Dosya: ${a.contentLengthFormatted}\n` +
+          `Encoding: ${a.encoding}\n` +
+          `Toplam Ürün: ${a.totalProducts}\n` +
+          `XML Key'i Olan: ${a.productsWithXmlKey}\n` +
+          `Kategori: ${a.uniqueCategories}\n` +
+          `Marka: ${a.uniqueBrands}\n` +
+          `Resim (HTTPS/HTTP/Geçersiz): ${a.httpsUrls}/${a.httpUrls}/${a.invalidUrls}\n` +
+          `CDATA: ${a.hasCDATA ? '✅ Var' : '❌ Yok'}\n` +
+          `HTML Entity: ${a.hasHtmlEntities ? '✅ Var' : '❌ Yok'}`
+        );
+      } else {
+        alert(`❌ Analiz başarısız: ${data.message || 'Bilinmeyen hata'}`);
+      }
+    } catch (error) {
+      alert('Ağ hatası');
+    }
+  }
+
+  async function handleCancelSync(id: string) {
+    try {
+      const response = await apiFetch(`/xml-sources/${id}/cancel`, { method: 'POST' });
+      const data = await response.json();
+      alert(data.message || 'İşlem tamamlandı');
+      fetchSources();
+    } catch (error) {
+      alert('Ağ hatası');
+    }
+  }
+
+  async function handleBatchSync() {
+    setBatchSyncing(true);
+    try {
+      const response = await apiFetch('/xml-sources/sync-all', { method: 'POST' });
+      const data = await response.json();
+      alert(data.message || 'Sync başlatıldı');
+      fetchSources();
+    } catch (error) {
+      alert('Ağ hatası');
+    } finally {
+      setBatchSyncing(false);
+    }
+  }
+
   async function handleTestConnection(id: string) {
     setTestingIds((prev) => ({ ...prev, [id]: true }));
     try {
-      const response = await fetch(`/xml-sources/${id}/test`, { method: 'POST', credentials: 'include' });
+      const response = await apiFetch(`/xml-sources/${id}/test`, { method: 'POST', });
       const data = await response.json();
       alert(data.message || (data.ok ? 'Bağlantı başarılı' : 'Bağlantı hatası'));
       fetchSources();
@@ -364,7 +422,7 @@ export default function XmlSources() {
   async function handleSaveMapping() {
     if (!selectedSourceId) return;
     try {
-      const response = await fetch(`/xml-sources/${selectedSourceId}/mapping`, {
+      const response = await apiFetch(`/xml-sources/${selectedSourceId}/mapping`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -383,7 +441,7 @@ export default function XmlSources() {
   async function handleSavePricing() {
     if (!selectedSourceId) return;
     try {
-      const response = await fetch(`/xml-sources/${selectedSourceId}/pricing`, {
+      const response = await apiFetch(`/xml-sources/${selectedSourceId}/pricing`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -403,7 +461,7 @@ export default function XmlSources() {
     if (!selectedSourceId) return;
     setPreviewLoading(true);
     try {
-      const response = await fetch(`/xml-sources/${selectedSourceId}/pricing/preview`, {
+      const response = await apiFetch(`/xml-sources/${selectedSourceId}/pricing/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -431,6 +489,7 @@ export default function XmlSources() {
       vatRate: source.vatRate,
       active: source.active,
       scheduleIntervalMinutes: source.scheduleIntervalMinutes,
+      cronExpression: (source as any).cronExpression || '',
       purchasePriceVatStatus: source.purchasePriceVatStatus,
       purchasePriceField: source.purchasePriceField || '',
       updateStock: true,
@@ -507,7 +566,7 @@ export default function XmlSources() {
 
   async function openProductDetail(product: ProductItem) {
     try {
-      const response = await fetch(`/products/${product.id}`, { credentials: 'include' });
+      const response = await apiFetch(`/products/${product.id}`);
       if (response.ok) {
         const data = await response.json();
         setSelectedProduct(data);
@@ -529,13 +588,23 @@ export default function XmlSources() {
           <h2 className="text-lg font-semibold text-white">Ürün Kaynakları (Tedarikçi XML Entegrasyon Merkezi)</h2>
           <p className="text-sm text-slate-400">Tedarikçi XML yönetimi, alan eşleştirme, fiyatlandırma ve senkronizasyon</p>
         </div>
-        <button
-          type="button"
-          onClick={() => { setEditingSource(null); setFormData({ name: '', company: '', sourceType: 'MANUAL', url: '', username: '', password: '', currency: 'TRY', vatRate: 20, active: true, scheduleIntervalMinutes: 60, purchasePriceVatStatus: 'dahil', purchasePriceField: '', updateStock: true, updatePrice: true, updateImages: true }); setShowModal(true); }}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-        >
-          + Yeni Tedarikçi Ekle
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleBatchSync}
+            disabled={batchSyncing}
+            className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+          >
+            {batchSyncing ? '⏳ Senkronize Ediliyor...' : '🔄 Tümünü Senkronize Et'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setEditingSource(null); setFormData({ name: '', company: '', sourceType: 'MANUAL', url: '', username: '', password: '', currency: 'TRY', vatRate: 20, active: true, scheduleIntervalMinutes: 60, cronExpression: '', purchasePriceVatStatus: 'dahil', purchasePriceField: '', updateStock: true, updatePrice: true, updateImages: true }); setShowModal(true); }}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+          >
+            + Yeni Tedarikçi Ekle
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -583,6 +652,10 @@ export default function XmlSources() {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">KDV</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Son Çalışma</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Ürün</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Yeni</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Günc.</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Hata</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-300">Süre</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-300">İşlemler</th>
                   </tr>
                 </thead>
@@ -606,12 +679,22 @@ export default function XmlSources() {
                         {source.lastSuccessAt ? new Date(source.lastSuccessAt).toLocaleString('tr-TR') : 'Henüz çalışmadı'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-300">{source.productCount}</td>
+                      <td className="px-4 py-3 text-sm text-green-400 font-medium">{source.lastNewProducts ?? '-'}</td>
+                      <td className="px-4 py-3 text-sm text-blue-400">{source.lastUpdatedProducts ?? '-'}</td>
+                      <td className="px-4 py-3 text-sm text-red-400">{source.lastFailedProducts ?? '-'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-400">
+                        {source.lastRunDurationMs != null ? `${(source.lastRunDurationMs / 1000).toFixed(1)}sn` : '-'}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button type="button" onClick={() => { setSelectedSourceId(source.id); setActiveTab('urunler'); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Ürünleri Gör">📦</button>
                           <button type="button" onClick={() => fetchHistory(source.id)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Geçmiş">📜</button>
+                          <button type="button" onClick={() => handleAnalyze(source.id)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="XML Analiz">🔍</button>
                           <button type="button" onClick={() => handleTestConnection(source.id)} disabled={testingIds[source.id]} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50" title="Bağlantı Testi">{testingIds[source.id] ? '⏳' : '🔌'}</button>
                           <button type="button" onClick={() => handleSync(source.id)} disabled={syncingIds[source.id]} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50" title="Sync">{syncingIds[source.id] ? '⏳' : '🔄'}</button>
+                          {syncingIds[source.id] && (
+                            <button type="button" onClick={() => handleCancelSync(source.id)} className="rounded-lg p-2 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors" title="İptal">⏹️</button>
+                          )}
                           <button type="button" onClick={() => { setSelectedSourceId(source.id); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Alan Eşleştirme">🔗</button>
                           <button type="button" onClick={() => { setSelectedSourceId(source.id); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Fiyatlandırma">💰</button>
                           <button type="button" onClick={() => openEditModal(source)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors" title="Düzenle">✏️</button>
@@ -879,6 +962,16 @@ export default function XmlSources() {
                   <input type="number" value={formData.scheduleIntervalMinutes} onChange={(e) => setFormData({ ...formData, scheduleIntervalMinutes: Number(e.target.value) })}
                     className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none" min="5" />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-1">Cron İfadesi <span className="text-xs text-slate-500">(opsiyonel)</span></label>
+                  <input type="text" value={formData.cronExpression} onChange={(e) => setFormData({ ...formData, cronExpression: e.target.value })}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none font-mono text-sm"
+                    placeholder="0 */6 * * * (her 6 saatte bir)" />
+                  <div className="mt-1 text-xs text-slate-500">
+                    ⏰ Boş bırakılırsa dakika bazlı zamanlama kullanılır.
+                    <a href="https://crontab.guru" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 ml-1">crontab.guru</a>
+                  </div>
+                </div>
               </div>
 
               {/* Aktif/Pasif */}
@@ -1089,3 +1182,5 @@ export default function XmlSources() {
     </div>
   );
 }
+
+

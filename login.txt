@@ -1,0 +1,1 @@
+{"ok":true,"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQURNSU4iLCJzdWIiOiJiNTgxODY4YS1jMGM0LTQ5YTAtOWYxMC1hYzc1MzJmNTE0OWMiLCJpYXQiOjE3ODM2OTE3ODUsImV4cCI6MTc4MzcyMDU4NX0.ynU6FSD7i8cDtFBS9ZxI6abF1eG6dRhSGoMZ-8S-t8g","user":{"id":"b581868a-c0c4-49a0-9f10-ac7532f5149c","email":"admin@dgstok.com","role":"ADMIN"}}

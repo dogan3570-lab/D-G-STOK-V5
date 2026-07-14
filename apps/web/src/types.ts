@@ -1,3 +1,5 @@
+// ==================== DG STOK V5.0 - GLOBAL TYPES ====================
+
 export type SseEventName =
   | 'ping'
   | 'marketplace.sync.start'
@@ -54,6 +56,8 @@ export type MarketplaceItem = {
   name: string;
   key: string;
   apiStatus?: string | null;
+  active?: boolean;
+  logo?: string;
 };
 
 export type ProductItem = {
@@ -64,7 +68,32 @@ export type ProductItem = {
   barcode: string | null;
   stock: number;
   minStock: number;
-  createdAt?: string;
+  purchasePrice: number | null;
+  salePrice: number | null;
+  vatRate: number | null;
+  profitMargin: number | null;
+  images: string | null;
+  status: string;
+  errorMessage: string | null;
+  aiScore: number | null;
+  categoryMatch: boolean;
+  brandMatch: boolean;
+  variantMatch: boolean;
+  templateMatch: boolean;
+  categoryId: string | null;
+  brandId: string | null;
+  xmlSourceId: string | null;
+  category?: { id: string; name: string } | null;
+  brand?: { id: string; name: string } | null;
+  xmlSource?: { id: string; name: string; company?: string | null } | null;
+  variants?: Array<{ id: string; name: string; value: string }>;
+  description?: string | null;
+  originalTitle?: string | null;
+  computedTitle?: string | null;
+  prefixEnabled?: boolean;
+  brandUsageType?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type HealthPayload = {
@@ -76,16 +105,25 @@ export type HealthPayload = {
 export type XmlSourceItem = {
   id: string;
   name: string;
-  type: 'xml' | 'yml' | 'csv' | 'excel';
-  url: string;
-  status: 'active' | 'error' | 'paused';
-  lastCheckAt?: string;
+  sourceType: string;
+  url: string | null;
+  active: boolean;
+  company: string | null;
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  connectionStatus: string;
+  totalProducts?: number;
+  categoryStatus?: string;
+  variantStatus?: string;
+  brandStatus?: string;
+  attributeStatus?: string;
 };
 
 export type TemplateItem = {
   id: string;
   name: string;
-  marketplaceKey: string;
+  marketplaceId: string | null;
+  marketplaceKey?: string;
   categoryPath: string;
   active: boolean;
   updatedAt: string;
@@ -122,3 +160,112 @@ export type SettingsGroup = {
   description: string;
   items: Array<{ key: string; value: string; sensitive?: boolean }>;
 };
+
+// ==================== URUN HAZIRLAMA TYPES ====================
+
+export interface CategoryPrepStats {
+  totalProducts: number;
+  autoMatched: number;
+  manualPending: number;
+  errorCount: number;
+  completionPercent: number;
+}
+
+export interface CategoryPrepItem {
+  id: string;
+  title: string | null;
+  xmlKey: string;
+  xmlCategory: string | null;
+  selectedCategoryPath: string | null;
+  aiScore: number | null;
+  status: 'auto' | 'manual' | 'pending' | 'error';
+  sku: string | null;
+  barcode: string | null;
+  images: string | null;
+  productId: string;
+}
+
+export interface BrandPrepItem {
+  id: string;
+  title: string | null;
+  xmlKey: string;
+  xmlBrand: string | null;
+  dgBrandName: string | null;
+  brandUsageType: string;
+  prefixEnabled: boolean;
+  computedTitle: string | null;
+  originalTitle: string | null;
+  status: 'ok' | 'pending';
+}
+
+export interface VariantPrepItem {
+  id: string;
+  title: string | null;
+  xmlKey: string;
+  parentSku: string;
+  childSku: string | null;
+  color: string | null;
+  size: string | null;
+  numberValue: string | null;
+  status: 'ready' | 'partial' | 'pending' | 'error';
+}
+
+export interface ListingRule {
+  id: string;
+  minPrice: number;
+  maxPrice: number;
+  profitMargin: number;
+  fixedAmount: number;
+  rounding: string;
+}
+
+export interface ListingPricePreview {
+  purchasePrice: number;
+  salePrice: number;
+  vat: number;
+  commission: number;
+  profit: number;
+  profitMargin: number;
+  finalPrice: number;
+}
+
+// ==================== GONDERIME HAZIR TYPES ====================
+
+export interface ReadyProductItem {
+  id: string;
+  title: string | null;
+  xmlKey: string;
+  sku: string | null;
+  barcode: string | null;
+  stock: number;
+  salePrice: number | null;
+  categoryMatch: boolean;
+  brandMatch: boolean;
+  variantMatch: boolean;
+  templateMatch: boolean;
+  categoryName: string | null;
+  brandName: string | null;
+  imageCount: number;
+  xmlSourceName: string | null;
+  status: string;
+  updatedAt: string;
+}
+
+// ==================== PAZARYERI YONETIMI TYPES ====================
+
+export interface SendLogItem {
+  id: string;
+  productId: string;
+  marketplaceId: string;
+  status: string;
+  message: string | null;
+  createdAt: string;
+  productTitle?: string;
+  marketplaceName?: string;
+}
+
+export interface MarketplaceSendRequest {
+  productIds: string[];
+  marketplaceId: string;
+  xmlSourceId?: string;
+}

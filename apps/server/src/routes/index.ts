@@ -9,6 +9,21 @@ import categoriesRoutes from './categories.ts';
 import variantsRoutes from './variants.ts';
 import automationRoutes from './automation.ts';
 import reportsRoutes from './reports.ts';
+import productsRoutes from './products.ts';
+import brandsRoutes from './brands.ts';
+import brandPoliciesRoutes from './brands-policy.ts';
+import transformRoutes from './transform.ts';
+import titleRoutes from './title.ts';
+import workflowRoutes from './workflow.ts';
+import aiRoutes from './ai.ts';
+import plmRoutes from './plm.ts';
+import rulesRoutes from './rules.ts';
+import dqcRoutes from './dqc.ts';
+import twinRoutes from './twin.ts';
+import mdmRoutes from './mdm.ts';
+import pipelineRoutes from './pipeline.ts';
+import listingsRoutes from './listings.ts';
+import variantsV2Router from './variantsV2.ts';
 
 export const router = Router();
 
@@ -35,6 +50,21 @@ router.use('/categories', categoriesRoutes);
 router.use('/variants', variantsRoutes);
 router.use('/automation', automationRoutes);
 router.use('/reports', reportsRoutes);
+router.use('/products', productsRoutes);
+router.use('/brands', brandsRoutes);
+router.use('/brand-policies', brandPoliciesRoutes);
+router.use('/transform', transformRoutes);
+router.use('/title', titleRoutes);
+router.use('/workflow', workflowRoutes);
+router.use('/ai', aiRoutes);
+router.use('/plm', plmRoutes);
+router.use('/rules', rulesRoutes);
+router.use('/dqc', dqcRoutes);
+router.use('/twin', twinRoutes);
+router.use('/mdm', mdmRoutes);
+router.use('/pipeline', pipelineRoutes);
+router.use('/listings', listingsRoutes);
+router.use('/variants/v2', variantsV2Router);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
@@ -78,6 +108,21 @@ router.get('/marketplaces', async (_req, res) => {
       orderBy: { createdAt: 'desc' },
     });
     return res.json({ items });
+  } catch (error) {
+    return handleDbError(res, error);
+  }
+});
+
+// GET /marketplaces/stats - Marketplace istatistikleri
+router.get('/marketplaces/stats', requireAuth, async (_req, res) => {
+  try {
+    const [total, connected, error, activeProducts] = await Promise.all([
+      prisma.marketplace.count(),
+      prisma.marketplace.count({ where: { apiStatus: 'ok' } }),
+      prisma.marketplace.count({ where: { apiStatus: 'error' } }),
+      prisma.productMarketplaceState.count({ where: { status: 'SENT' } }),
+    ]);
+    res.json({ total, connected, connectionError: error, apiError: 0, sentProducts: activeProducts, pendingProducts: 0, failedProducts: 0, successfulProducts: activeProducts });
   } catch (error) {
     return handleDbError(res, error);
   }
@@ -201,125 +246,7 @@ router.delete('/marketplaces/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR'
   }
 });
 
-router.get('/products', async (req, res) => {
-  try {
-    const search = String(req.query?.search ?? '').trim();
-    const categoryId = req.query?.categoryId ? String(req.query.categoryId) : null;
-    const brandId = req.query?.brandId ? String(req.query.brandId) : null;
-    const status = req.query?.status ? String(req.query.status) : null;
-    const lowStock = req.query?.lowStock === 'true';
-    const page = Math.max(1, Number(req.query?.page ?? 1));
-    const limit = Math.min(100, Math.max(10, Number(req.query?.limit ?? 50)));
-    const skip = (page - 1) * limit;
-
-    const where: Record<string, unknown> = {};
-    
-    if (search) {
-      where.OR = [
-        { title: { contains: search } },
-        { xmlKey: { contains: search } },
-        { sku: { contains: search } },
-        { barcode: { contains: search } },
-      ];
-    }
-    
-    if (categoryId) {
-      where.categoryId = categoryId;
-    }
-    
-    if (brandId) {
-      where.brandId = brandId;
-    }
-    
-    if (status) {
-      where.status = status;
-    }
-    
-    if (lowStock) {
-      where.stock = { lte: 0 };
-    }
-
-    const [items, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-        include: {
-          category: { select: { id: true, name: true } },
-          brand: { select: { id: true, name: true } },
-          variants: { select: { id: true, name: true, value: true } },
-        },
-      }),
-      prisma.product.count({ where }),
-    ]);
-
-    return res.json({ 
-      items, 
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
-  } catch (error) {
-    return handleDbError(res, error);
-  }
-});
-
-// GET /products/:id - Get single product with full details
-router.get('/products/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const product = await prisma.product.findUnique({
-      where: { id },
-      include: {
-        category: { select: { id: true, name: true } },
-        brand: { select: { id: true, name: true } },
-        variants: true,
-        xmlSource: { select: { id: true, name: true } },
-      },
-    });
-
-    if (!product) {
-      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Product not found' } });
-    }
-
-    return res.json(product);
-  } catch (error) {
-    return handleDbError(res, error);
-  }
-});
-
-router.post('/products', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
-  const xmlKey = String(req.body?.xmlKey ?? '').trim();
-  const title = req.body?.title !== undefined ? String(req.body.title).trim() : null;
-  const sku = req.body?.sku !== undefined ? String(req.body.sku).trim() : null;
-  const barcode = req.body?.barcode !== undefined ? String(req.body.barcode).trim() : null;
-  const stock = Number(req.body?.stock ?? 0);
-  const minStock = Number(req.body?.minStock ?? 0);
-
-  if (!xmlKey) {
-    return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'xmlKey zorunludur' } });
-  }
-
-  try {
-    const created = await prisma.product.create({
-      data: {
-        xmlKey,
-        title,
-        sku,
-        barcode,
-        stock: Number.isFinite(stock) ? stock : 0,
-        minStock: Number.isFinite(minStock) ? minStock : 0,
-      },
-    });
-    return res.status(201).json({ ok: true, item: created });
-  } catch {
-    return res.status(409).json({ ok: false, error: { code: 'CONFLICT', message: 'Product xmlKey zaten kayıtlı olabilir' } });
-  }
-});
+// Ürün route'ları apps/server/src/routes/products.ts dosyasına taşındı
 
 router.post('/xml/import', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
   const xml = typeof req.body?.xml === 'string' ? req.body.xml : '';
@@ -368,43 +295,7 @@ router.post('/xml/import', requireAuth, requireRole(['ADMIN', 'OPERATOR']), asyn
   }
 });
 
-router.put('/products/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
-  const id = String(req.params.id ?? '');
-  if (!id) {
-    return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'id zorunludur' } });
-  }
-
-  const data: Record<string, unknown> = {};
-  if (req.body?.title !== undefined) data.title = String(req.body.title).trim();
-  if (req.body?.sku !== undefined) data.sku = String(req.body.sku).trim();
-  if (req.body?.barcode !== undefined) data.barcode = String(req.body.barcode).trim();
-  if (req.body?.stock !== undefined) data.stock = Number(req.body.stock);
-  if (req.body?.minStock !== undefined) data.minStock = Number(req.body.minStock);
-
-  try {
-    const updated = await prisma.product.update({
-      where: { id },
-      data,
-    });
-    return res.json({ ok: true, item: updated });
-  } catch {
-    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Product bulunamadı' } });
-  }
-});
-
-router.delete('/products/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
-  const id = String(req.params.id ?? '');
-  if (!id) {
-    return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'id zorunludur' } });
-  }
-
-  try {
-    await prisma.product.delete({ where: { id } });
-    return res.json({ ok: true });
-  } catch {
-    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Product bulunamadı' } });
-  }
-});
+// PUT/DELETE /products/:id route'ları apps/server/src/routes/products.ts dosyasına taşındı
 
 // Dashboard summary: product counts by marketplace and status
 router.get('/dashboard/summary', async (_req, res) => {
@@ -508,45 +399,7 @@ router.post('/debug/seed-admin', async (_req, res) => {
   return res.json({ ok: true, created: admin });
 });
 
-// ==================== BRANDS ====================
-router.get('/brands', async (_req, res) => {
-  try {
-    const items = await prisma.brand.findMany({ orderBy: { name: 'asc' } });
-    return res.json({ items });
-  } catch (error) {
-    return handleDbError(res, error);
-  }
-});
-
-router.post('/brands', requireAuth, async (req, res) => {
-  try {
-    const { name, externalId } = req.body;
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const item = await prisma.brand.create({ data: { name, externalId } });
-    return res.status(201).json({ item });
-  } catch (error) {
-    return handleDbError(res, error);
-  }
-});
-
-router.put('/brands/:id', requireAuth, async (req, res) => {
-  try {
-    const { name, externalId } = req.body;
-    const item = await prisma.brand.update({ where: { id: req.params.id }, data: { name, externalId } });
-    return res.json({ item });
-  } catch (error) {
-    return handleDbError(res, error);
-  }
-});
-
-router.delete('/brands/:id', requireAuth, async (req, res) => {
-  try {
-    await prisma.brand.delete({ where: { id: req.params.id } });
-    return res.json({ ok: true });
-  } catch (error) {
-    return handleDbError(res, error);
-  }
-});
+// Brand route'ları apps/server/src/routes/brands.ts dosyasına taşındı
 
 // ==================== ORDERS ====================
 router.get('/orders', async (req, res) => {
@@ -778,15 +631,24 @@ router.put('/users/:id', requireAuth, requireRole(['ADMIN']), async (req, res) =
 // ==================== DASHBOARD STATS ====================
 router.get('/dashboard/stats', async (_req, res) => {
   try {
-    const [totalProducts, totalOrders, totalMarketplaces, totalXmlSources, activeXmlSources, lowStockProducts, errorProducts, todayOrders] = await Promise.all([
+    const now = new Date();
+    const todayStart = new Date(now.setHours(0, 0, 0, 0));
+    const [totalProducts, totalOrders, totalMarketplaces, totalXmlSources, activeXmlSources, passiveXmlSources, lowStockProducts, errorProducts, todayOrders, xmlSourcesWithError, todayXmlUpdates, readyProducts, brandCount, categoryCount, variantCount] = await Promise.all([
       prisma.product.count(),
       prisma.order.count(),
       prisma.marketplace.count(),
       prisma.xmlSource.count(),
       prisma.xmlSource.count({ where: { active: true } }),
+      prisma.xmlSource.count({ where: { active: false } }),
       prisma.product.count({ where: { stock: { lte: 0 } } }),
       prisma.product.count({ where: { status: 'ERROR' } }),
-      prisma.order.count({ where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } }),
+      prisma.order.count({ where: { createdAt: { gte: todayStart } } }),
+      prisma.xmlSource.count({ where: { connectionStatus: 'error' } }),
+      prisma.xmlImportRun.count({ where: { startedAt: { gte: todayStart }, status: { not: 'running' } } }),
+      prisma.product.count({ where: { status: 'READY' } }),
+      prisma.brand.count(),
+      prisma.category.count(),
+      prisma.variant.count(),
     ]);
 
     return res.json({
@@ -795,9 +657,16 @@ router.get('/dashboard/stats', async (_req, res) => {
       totalMarketplaces,
       totalXmlSources,
       activeXmlSources,
+      passiveXmlSources,
+      xmlSourcesWithError,
+      todayXmlUpdates,
       lowStockProducts,
       errorProducts,
+      readyProducts,
       todayOrders,
+      brandCount,
+      categoryCount,
+      variantCount,
     });
   } catch (error) {
     return handleDbError(res, error);

@@ -2,65 +2,47 @@ import React from 'react';
 
 interface KpiCardProps {
   title: string;
-  value: string | number;
+  value: number | string;
   subtitle?: string;
   icon?: string;
-  trend?: 'up' | 'down' | 'flat';
-  trendValue?: string;
-  color?: 'blue' | 'green' | 'yellow' | 'red' | 'purple';
+  color?: 'blue' | 'green' | 'red' | 'yellow' | 'orange' | 'cyan' | 'teal' | 'slate' | 'purple';
+  loading?: boolean;
 }
 
-const colorClasses = {
-  blue: 'border-blue-500/20 bg-blue-500/10',
-  green: 'border-green-500/20 bg-green-500/10',
-  yellow: 'border-yellow-500/20 bg-yellow-500/10',
-  red: 'border-red-500/20 bg-red-500/10',
-  purple: 'border-purple-500/20 bg-purple-500/10',
+const COLOR_MAP: Record<string, string> = {
+  blue: 'border-blue-500/20 bg-blue-500/10 text-blue-400',
+  green: 'border-green-500/20 bg-green-500/10 text-green-400',
+  red: 'border-red-500/20 bg-red-500/10 text-red-400',
+  yellow: 'border-yellow-500/20 bg-yellow-500/10 text-yellow-400',
+  orange: 'border-orange-500/20 bg-orange-500/10 text-orange-400',
+  cyan: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400',
+  teal: 'border-teal-500/20 bg-teal-500/10 text-teal-400',
+  slate: 'border-slate-500/20 bg-slate-500/10 text-slate-400',
+  purple: 'border-purple-500/20 bg-purple-500/10 text-purple-400',
 };
 
-const iconBgClasses = {
-  blue: 'bg-blue-600',
-  green: 'bg-green-600',
-  yellow: 'bg-yellow-600',
-  red: 'bg-red-600',
-  purple: 'bg-purple-600',
-};
+export default function KpiCard({ title, value, subtitle, icon, color = 'slate', loading = false }: KpiCardProps) {
+  const valColor = COLOR_MAP[color] || COLOR_MAP.slate;
+  const valClass = valColor.split(' ')[2] || 'text-white';
 
-export default function KpiCard({
-  title,
-  value,
-  subtitle,
-  icon,
-  trend,
-  trendValue,
-  color = 'blue',
-}: KpiCardProps) {
-  return (
-    <div className={`rounded-xl border p-4 ${colorClasses[color]} backdrop-blur-sm`}>
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="text-sm text-slate-400">{title}</div>
-          <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
-          {subtitle && <div className="mt-1 text-xs text-slate-500">{subtitle}</div>}
-        </div>
-        {icon && (
-          <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${iconBgClasses[color]}`}>
-            <span className="text-lg">{icon}</span>
-          </div>
-        )}
+  if (loading) {
+    return (
+      <div className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/50 p-4">
+        <div className="h-3 w-20 bg-slate-700 rounded mb-2" />
+        <div className="h-6 w-12 bg-slate-700 rounded" />
       </div>
-      {trend && trendValue && (
-        <div className="mt-3 flex items-center gap-2 text-xs">
-          <span
-            className={`flex items-center gap-1 font-medium ${
-              trend === 'up' ? 'text-green-400' : trend === 'down' ? 'text-red-400' : 'text-slate-400'
-            }`}
-          >
-            {trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'} {trendValue}
-          </span>
-          <span className="text-slate-500">geçen aya göre</span>
-        </div>
-      )}
+    );
+  }
+
+  return (
+    <div className={`rounded-xl border p-3 ${valColor.split(' ').slice(0, 2).join(' ')} backdrop-blur-sm`}>
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-slate-400 truncate">{icon ? `${icon} ${title}` : title}</div>
+      </div>
+      <div className={`mt-1 text-lg font-semibold ${valClass}`}>
+        {typeof value === 'number' ? value.toLocaleString('tr-TR') : value}
+      </div>
+      {subtitle && <div className="text-[10px] text-slate-500 mt-0.5">{subtitle}</div>}
     </div>
   );
 }

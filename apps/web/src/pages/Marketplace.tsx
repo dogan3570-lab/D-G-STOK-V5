@@ -1,229 +1,443 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { apiFetch } from '../lib/api';
+import KpiCard from '../components/ui/KpiCard';
+
+/* ============================================================
+   TYPES
+   ============================================================ */
+
+interface MarketplaceStats {
+  total: number;
+  connected: number;
+  connectionError: number;
+  apiError: number;
+  sentProducts: number;
+  pendingProducts: number;
+  failedProducts: number;
+  successfulProducts: number;
+}
 
 interface MarketplaceItem {
   id: string;
   key: string;
   name: string;
+  logo?: string;
   apiKey: string | null;
   apiSecret: string | null;
   apiUrl: string | null;
   apiStatus: string;
+  tokenStatus: string;
+  clientId: string | null;
+  merchantId: string | null;
+  token: string | null;
+  webhookUrl: string | null;
+  environment: 'production' | 'sandbox';
   active: boolean;
   settings: string | null;
+  lastSyncAt: string | null;
+  productCount: number;
+  orderCount: number;
   createdAt: string;
   updatedAt: string;
 }
 
-export default function Marketplace() {
+interface MarketplaceFormData {
+  name: string;
+  key: string;
+  apiKey: string;
+  apiSecret: string;
+  clientId: string;
+  merchantId: string;
+  token: string;
+  webhookUrl: string;
+  environment: 'production' | 'sandbox';
+}
+
+type TabView = 'list' | 'detail';
+type DetailTab = 'settings' | 'sync' | 'logs';
+
+interface SyncLog {
+  id: string;
+  type: 'product' | 'order' | 'inventory' | 'price';
+  status: 'success' | 'error' | 'running' | 'pending';
+  startedAt: string;
+  completedAt: string | null;
+  message: string;
+  itemCount: number;
+}
+
+/* ============================================================
+   CONSTANTS
+   ============================================================ */
+
+const MARKETPLACE_LOGOS: Record<string, string> = {
+  trendyol: '🛒',
+  tt: '🛒',
+  hepsiburada: '📦',
+  he: '📦',
+  n11: '🏪',
+  amazon: '📦',
+  amazon_tr: '📦',
+  çiçeksepeti: '🌸',
+  ciceksepeti: '🌸',
+  pt: '📱',
+  pttavm: '📱',
+  idefix: '📚',
+  pazarama: '🛍️',
+  woocommerce: '🛒',
+  shopify: '🛍️',
+};
+
+const EMPTY_FORM: MarketplaceFormData = {
+  name: '',
+  key: '',
+  apiKey: '',
+  apiSecret: '',
+  clientId: '',
+  merchantId: '',
+  token: '',
+  webhookUrl: '',
+  environment: 'production',
+};
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
+function getMarketplaceLogo(key: string): string {
+  const k = key.toLowerCase();
+  return MARKETPLACE_LOGOS[k] || '🛍️';
+}
+
+function generateKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .substring(0, 20) || 'pazaryeri';
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '-';
+  try {
+    return new Date(dateStr).toLocaleString('tr-TR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '-';
+  }
+}
+
+function getApiStatusLabel(status: string): { label: string; color: string } {
+  const map: Record<string, { label: string; color: string }> = {
+    connected: { label: 'Bağlı', color: 'bg-green-500/10 text-green-400 border-green-500/20' },
+    ok: { label: 'Bağlı', color: 'bg-green-500/10 text-green-400 border-green-500/20' },
+    error: { label: 'Hata', color: 'bg-red-500/10 text-red-400 border-red-500/20' },
+    unauthorized: { label: 'Yetkisiz', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
+    unknown: { label: 'Bilinmiyor', color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+    timeout: { label: 'Zaman Aşımı', color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+  };
+  return map[status] || { label: status, color: 'bg-slate-500/10 text-slate-400 border-slate-500/20' };
+}
+
+function getTokenStatusLabel(status: string): { label: string; color: string } {
+  const map: Record<string, { label: string; color: string }> = {
+    valid: { label: 'Geçerli', color: 'bg-green-500/10 text-green-400' },
+    expired: { label: 'Süresi Doldu', color: 'bg-red-500/10 text-red-400' },
+    missing: { label: 'Eksik', color: 'bg-yellow-500/10 text-yellow-400' },
+    about_to_expire: { label: 'Yaklaşan', color: 'bg-orange-500/10 text-orange-400' },
+  };
+  return map[status] || { label: status, color: 'bg-slate-500/10 text-slate-400' };
+}
+
+function getSyncStatusIcon(status: string): string {
+  const map: Record<string, string> = {
+    success: '✅',
+    error: '❌',
+    running: '🔄',
+    pending: '⏳',
+  };
+  return map[status] || '❓';
+}
+
+/* ============================================================
+   MAIN COMPONENT
+   ============================================================ */
+
+export default function MarketplacePage() {
+  /* ---- State ------------------------------------------- */
   const [marketplaces, setMarketplaces] = useState<MarketplaceItem[]>([]);
+  const [stats, setStats] = useState<MarketplaceStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  /* Modal (Yeni / Düzenle) */
   const [showModal, setShowModal] = useState(false);
-  const [editingMarketplace, setEditingMarketplace] = useState<MarketplaceItem | null>(null);
-  const [formData, setFormData] = useState<Record<string, string>>({
-    key: '',
-    name: '',
-    apiKey: '',
-    apiSecret: '',
-    apiUrl: '',
-    sellerId: '',
-    apiStatus: 'unknown',
-  });
-  const [message, setMessage] = useState('');
-  const [syncingKeys, setSyncingKeys] = useState<Record<string, boolean>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<MarketplaceFormData>(EMPTY_FORM);
+  const [submitting, setSubmitting] = useState(false);
+
+  /* Bağlantı Testi */
   const [testingIds, setTestingIds] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    fetchMarketplaces();
+  /* Detay Paneli */
+  const [view, setView] = useState<TabView>('list');
+  const [selectedMarketplace, setSelectedMarketplace] = useState<MarketplaceItem | null>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>('settings');
+  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
+  const [syncLogsLoading, setSyncLogsLoading] = useState(false);
+
+  /* ---- Veri Çekme ------------------------------------- */
+  const fetchMarketplaces = useCallback(async () => {
+    try {
+      const res = await apiFetch<any>('/marketplaces');
+      if (res.ok && res.data) {
+        setMarketplaces(res.data.items || []);
+      }
+    } catch (err) {
+      console.error('Pazaryeri listesi hatası:', err);
+    }
   }, []);
 
-  async function fetchMarketplaces() {
+  const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch('/marketplaces', { credentials: 'include' });
-      const data = await response.json();
-      setMarketplaces(data.items || []);
-    } catch (error) {
-      console.error('Error fetching marketplaces:', error);
-    } finally {
-      setLoading(false);
+      const res = await apiFetch<any>('/marketplaces/stats');
+      if (res.ok && res.data) {
+        setStats(res.data);
+      }
+    } catch (err) {
+      console.error('Pazaryeri istatistik hatası:', err);
     }
-  }
+  }, []);
 
-  function resetForm() {
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([fetchMarketplaces(), fetchStats()]);
+    setLoading(false);
+  }, [fetchMarketplaces, fetchStats]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  /* ---- Mesaj Yönetimi --------------------------------- */
+  const showMessage = (type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 4000);
+  };
+
+  /* ---- Modal Yönetimi --------------------------------- */
+  const openAddModal = () => {
+    setEditingId(null);
+    setFormData(EMPTY_FORM);
+    setShowModal(true);
+  };
+
+  const openEditModal = (mp: MarketplaceItem) => {
+    setEditingId(mp.id);
     setFormData({
-      key: '',
-      name: '',
-      apiKey: '',
+      name: mp.name,
+      key: mp.key,
+      apiKey: mp.apiKey || '',
       apiSecret: '',
-      apiUrl: '',
-      sellerId: '',
-      apiStatus: 'unknown',
+      clientId: mp.clientId || '',
+      merchantId: mp.merchantId || '',
+      token: mp.token || '',
+      webhookUrl: mp.webhookUrl || '',
+      environment: mp.environment || 'production',
     });
-    setMessage('');
-  }
 
-  // Name'den otomatik key oluştur
-  function generateKey(name: string): string {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .substring(0, 20) || 'pazaryeri';
-  }
+    // settings JSON içinden ek bilgileri çek
+    if (mp.settings) {
+      try {
+        const s = JSON.parse(mp.settings);
+        if (s.apiKey && !formData.apiKey) setFormData((prev) => ({ ...prev, apiKey: s.apiKey }));
+        if (s.apiSecret && !formData.apiSecret) setFormData((prev) => ({ ...prev, apiSecret: s.apiSecret }));
+        if (s.clientId) setFormData((prev) => ({ ...prev, clientId: s.clientId }));
+        if (s.merchantId) setFormData((prev) => ({ ...prev, merchantId: s.merchantId }));
+        if (s.token) setFormData((prev) => ({ ...prev, token: s.token }));
+        if (s.webhookUrl) setFormData((prev) => ({ ...prev, webhookUrl: s.webhookUrl }));
+        if (s.environment) setFormData((prev) => ({ ...prev, environment: s.environment }));
+      } catch { /* ignore */ }
+    }
 
-  async function handleSubmit(e: React.FormEvent) {
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingId(null);
+    setFormData(EMPTY_FORM);
+  };
+
+  /* ---- Form İşlemleri --------------------------------- */
+  const handleFormChange = (field: keyof MarketplaceFormData, value: string) => {
+    setFormData((prev) => {
+      const next = { ...prev, [field]: value };
+      // Name değişince otomatik key oluştur (sadece yeni kayıtta)
+      if (field === 'name' && !editingId) {
+        next.key = generateKey(value);
+      }
+      return next;
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage('İşleniyor...');
+    setSubmitting(true);
 
     try {
-      const url = editingMarketplace ? `/marketplaces/${editingMarketplace.id}` : '/marketplaces';
-      const method = editingMarketplace ? 'PUT' : 'POST';
-      
-      const key = editingMarketplace ? editingMarketplace.key : generateKey(formData.name);
+      const isEdit = !!editingId;
+      const url = isEdit ? `/marketplaces/${editingId}` : '/marketplaces';
+      const method = isEdit ? 'PUT' : 'POST';
 
-      const body: Record<string, string> = {
-        key,
+      const body: Record<string, string | boolean> = {
+        key: formData.key || generateKey(formData.name),
         name: formData.name.trim(),
-        apiStatus: 'unknown', // Sistem otomatik belirleyecek
+        environment: formData.environment,
       };
 
-      if (formData.apiKey?.trim()) body.apiKey = formData.apiKey.trim();
-      if (formData.apiSecret?.trim()) body.apiSecret = formData.apiSecret.trim();
-      if (formData.sellerId?.trim()) body.sellerId = formData.sellerId.trim();
+      if (formData.apiKey.trim()) body.apiKey = formData.apiKey.trim();
+      if (formData.apiSecret.trim()) body.apiSecret = formData.apiSecret.trim();
+      if (formData.clientId.trim()) body.clientId = formData.clientId.trim();
+      if (formData.merchantId.trim()) body.merchantId = formData.merchantId.trim();
+      if (formData.token.trim()) body.token = formData.token.trim();
+      if (formData.webhookUrl.trim()) body.webhookUrl = formData.webhookUrl.trim();
 
-      const response = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(body),
       });
 
-      if (response.ok) {
-        setMessage('✅ Başarılı');
-        setTimeout(() => {
-          setShowModal(false);
-          setEditingMarketplace(null);
-          resetForm();
-          fetchMarketplaces();
-        }, 500);
+      if (res.ok) {
+        showMessage('success', isEdit ? '✅ Pazaryeri güncellendi' : '✅ Pazaryeri eklendi');
+        closeModal();
+        await fetchAll();
       } else {
-        const data = await response.json();
-        setMessage(`❌ ${data.error?.message || 'Hata oluştu'}`);
+        showMessage('error', `❌ ${res.error?.message || 'İşlem başarısız'}`);
       }
-    } catch (error) {
-      setMessage('❌ Ağ hatası');
+    } catch {
+      showMessage('error', '❌ Ağ hatası');
+    } finally {
+      setSubmitting(false);
     }
-  }
+  };
 
-  async function handleDelete(id: string) {
-    if (!confirm('Bu pazaryerini silmek istediğinizden emin misiniz?')) return;
+  /* ---- Silme ------------------------------------------ */
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`"${name}" pazaryerini silmek istediğinizden emin misiniz?\nBu işlem geri alınamaz.`)) return;
     try {
-      const response = await fetch(`/marketplaces/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (response.ok) {
-        fetchMarketplaces();
+      const res = await apiFetch(`/marketplaces/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showMessage('success', `🗑️ "${name}" silindi`);
+        await fetchAll();
+        // Detay görünümündeysek listeye dön
+        if (selectedMarketplace?.id === id) {
+          setView('list');
+          setSelectedMarketplace(null);
+        }
       } else {
-        alert('Silme başarısız');
+        showMessage('error', '❌ Silme başarısız');
       }
-    } catch (error) {
-      alert('Ağ hatası');
+    } catch {
+      showMessage('error', '❌ Ağ hatası');
     }
-  }
+  };
 
-  async function handleTestConnection(id: string) {
+  /* ---- Bağlantı Testi --------------------------------- */
+  const handleTestConnection = async (id: string) => {
     setTestingIds((prev) => ({ ...prev, [id]: true }));
     try {
-      const response = await fetch(`/marketplaces/${id}/test`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const data = await response.json();
-      alert(data.message || (data.ok ? '✅ Bağlantı başarılı' : '❌ Bağlantı hatası'));
-      fetchMarketplaces();
-    } catch (error) {
-      alert('Ağ hatası');
+      const res = await apiFetch<any>(`/marketplaces/${id}/test`, { method: 'POST' });
+      if (res.ok && res.data?.ok) {
+        showMessage('success', '✅ Bağlantı başarılı');
+      } else {
+        showMessage('error', `❌ ${res.error?.message || 'Bağlantı hatası'}`);
+      }
+      await fetchAll();
+    } catch {
+      showMessage('error', '❌ Ağ hatası');
     } finally {
       setTestingIds((prev) => ({ ...prev, [id]: false }));
     }
-  }
+  };
 
-  async function handleSync(key: string) {
-    setSyncingKeys((prev) => ({ ...prev, [key]: true }));
+  /* ---- Detay Paneli ----------------------------------- */
+  const openDetail = (mp: MarketplaceItem) => {
+    setSelectedMarketplace(mp);
+    setDetailTab('settings');
+    setSyncLogs([]);
+    setView('detail');
+  };
+
+  const closeDetail = () => {
+    setView('list');
+    setSelectedMarketplace(null);
+    setSyncLogs([]);
+  };
+
+  const fetchSyncLogs = async (marketplaceId: string) => {
+    setSyncLogsLoading(true);
     try {
-      const response = await fetch('/actions/marketplace/sync', {
+      const res = await apiFetch<any>(`/marketplaces/${marketplaceId}/sync-logs`);
+      if (res.ok && res.data) {
+        setSyncLogs(res.data.items || []);
+      }
+    } catch {
+      setSyncLogs([]);
+    } finally {
+      setSyncLogsLoading(false);
+    }
+  };
+
+  const handleDetailTabChange = (tab: DetailTab) => {
+    setDetailTab(tab);
+    if (tab === 'logs' && selectedMarketplace) {
+      fetchSyncLogs(selectedMarketplace.id);
+    }
+  };
+
+  const handleSyncNow = async (key: string) => {
+    try {
+      const res = await apiFetch('/actions/marketplace/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ marketplaceKey: key, totalSteps: 5 }),
       });
-      if (response.ok) {
-        alert('Sync kuyruğa eklendi');
+      if (res.ok) {
+        showMessage('success', '🔄 Senkronizasyon başlatıldı');
       } else {
-        const data = await response.json();
-        alert(`Sync başarısız: ${data.error?.message || 'Bilinmeyen hata'}`);
+        showMessage('error', `❌ ${res.error?.message || 'Senkronizasyon hatası'}`);
       }
-    } catch (error) {
-      alert('Ağ hatası');
-    } finally {
-      setSyncingKeys((prev) => ({ ...prev, [key]: false }));
+    } catch {
+      showMessage('error', '❌ Ağ hatası');
     }
-  }
+  };
 
-  function openEditModal(marketplace: MarketplaceItem) {
-    setEditingMarketplace(marketplace);
-    
-    const newForm: Record<string, string> = {
-      key: marketplace.key,
-      name: marketplace.name,
-      apiKey: marketplace.apiKey || '',
-      apiSecret: '',
-      apiUrl: marketplace.apiUrl || '',
-      sellerId: '',
-      apiStatus: marketplace.apiStatus,
-    };
-
-    if (marketplace.settings) {
-      try {
-        const settings = JSON.parse(marketplace.settings);
-        if (settings.sellerId) newForm.sellerId = settings.sellerId;
-        if (settings.apiKey) newForm.apiKey = settings.apiKey;
-        if (settings.apiSecret) newForm.apiSecret = settings.apiSecret;
-      } catch {}
-    }
-
-    setFormData(newForm);
-    setMessage('');
-    setShowModal(true);
-  }
-
-  function getStatusBadge(status: string) {
-    const statusMap: Record<string, { label: string; color: string }> = {
-      unknown: { label: 'Bilinmiyor', color: 'bg-slate-500/10 text-slate-400' },
-      ok: { label: 'Çalışıyor', color: 'bg-green-500/10 text-green-400' },
-      connected: { label: 'Bağlı', color: 'bg-green-500/10 text-green-400' },
-      error: { label: 'Hata', color: 'bg-red-500/10 text-red-400' },
-      unauthorized: { label: 'Yetkisiz', color: 'bg-yellow-500/10 text-yellow-400' },
-    };
-    const s = statusMap[status] || { label: status, color: 'bg-slate-500/10 text-slate-400' };
-    return <span className={`rounded-full px-2 py-1 text-xs font-medium ${s.color}`}>{s.label}</span>;
-  }
-
-  function getStatusDot(status: string) {
-    if (status === 'ok' || status === 'connected') return <span className="flex h-2 w-2 rounded-full bg-green-500" title="Aktif"></span>;
-    if (status === 'error') return <span className="flex h-2 w-2 rounded-full bg-red-500" title="Hata"></span>;
-    return <span className="flex h-2 w-2 rounded-full bg-slate-500" title="Bilinmiyor"></span>;
-  }
-
-  function getMarketplaceIcon(key: string): string {
-    const icons: Record<string, string> = {
-      tt: '🛒',
-      trendyol: '🛒',
-      he: '📦',
-      hepsiburada: '📦',
-      n11: '🏪',
-      amazon: '📦',
-    };
-    return icons[key.toLowerCase()] || '🛍️';
+  /* ============================================================
+     RENDER: ANA SAYFA
+     ============================================================ */
+  if (view === 'detail' && selectedMarketplace) {
+    return (
+      <DetailView
+        mp={selectedMarketplace}
+        activeTab={detailTab}
+        syncLogs={syncLogs}
+        syncLogsLoading={syncLogsLoading}
+        onDetailTabChange={handleDetailTabChange}
+        onClose={closeDetail}
+        onSyncNow={handleSyncNow}
+        onTestConnection={handleTestConnection}
+        onEdit={() => {
+          closeDetail();
+          openEditModal(selectedMarketplace);
+        }}
+      />
+    );
   }
 
   return (
@@ -231,147 +445,611 @@ export default function Marketplace() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-white">Pazaryeri Paneli</h2>
-          <p className="text-sm text-slate-400">Pazaryeri entegrasyonlarını yönetin, API bilgilerini girin ve bağlantı testi yapın</p>
+          <h2 className="text-lg font-semibold text-white">Pazaryeri Yönetimi</h2>
+          <p className="text-sm text-slate-400">
+            Pazaryeri entegrasyonlarını yönetin, API bilgilerini girin, bağlantı testi yapın ve senkronizasyonu izleyin
+          </p>
         </div>
         <button
           type="button"
-          onClick={() => { setEditingMarketplace(null); resetForm(); setShowModal(true); }}
+          onClick={openAddModal}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
         >
           + Yeni Pazaryeri Ekle
         </button>
       </div>
 
-      {/* Marketplace Cards */}
-      {loading ? (
-        <div className="flex items-center justify-center p-8 text-slate-400">Yükleniyor...</div>
-      ) : marketplaces.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-8 text-slate-400">
-          <div className="text-4xl mb-2">🛒</div>
-          <div>Henüz pazaryeri eklenmedi</div>
-          <button
-            type="button"
-            onClick={() => { setEditingMarketplace(null); resetForm(); setShowModal(true); }}
-            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-          >
-            + İlk Pazaryerini Ekle
-          </button>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {marketplaces.map((marketplace) => (
-            <div key={marketplace.id} className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl">{getMarketplaceIcon(marketplace.key)}</span>
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">{marketplace.name}</h3>
-                    <p className="text-sm text-slate-400">{marketplace.key}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {getStatusDot(marketplace.apiStatus)}
-                  {getStatusBadge(marketplace.apiStatus)}
-                </div>
-              </div>
-
-              <div className="space-y-2 mb-4">
-                {marketplace.apiKey && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-400">API Key</span>
-                    <span className="text-slate-300" title={marketplace.apiKey}>
-                      {marketplace.apiKey.substring(0, 3)}.......
-                    </span>
-                  </div>
-                )}
-                {marketplace.apiUrl && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-400">API URL</span>
-                    <span className="text-slate-300 max-w-[200px] truncate">{marketplace.apiUrl}</span>
-                  </div>
-                )}
-                {marketplace.settings && (() => {
-                  try {
-                    const settings = JSON.parse(marketplace.settings);
-                    return settings.sellerId ? (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">Satıcı ID</span>
-                        <span className="text-slate-300">{settings.sellerId}</span>
-                      </div>
-                    ) : null;
-                  } catch { return null; }
-                })()}
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Durum</span>
-                  <span className="text-slate-300">{marketplace.active ? 'Aktif' : 'Pasif'}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Eklenme</span>
-                  <span className="text-slate-300">{new Date(marketplace.createdAt).toLocaleDateString('tr-TR')}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleTestConnection(marketplace.id)}
-                  disabled={testingIds[marketplace.id]}
-                  className="flex-1 rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition-colors"
-                >
-                  {testingIds[marketplace.id] ? '⏳ Test...' : '🔌 Test'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSync(marketplace.key)}
-                  disabled={syncingKeys[marketplace.key]}
-                  className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                >
-                  {syncingKeys[marketplace.key] ? '⏳...' : '🔄 Sync'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openEditModal(marketplace)}
-                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
-                  title="Düzenle"
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(marketplace.id)}
-                  className="rounded-lg p-2 text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
-                  title="Sil"
-                >
-                  🗑️
-                </button>
-              </div>
-            </div>
-          ))}
+      {/* Bildirim Mesajı */}
+      {message && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            message.type === 'success'
+              ? 'border-green-500/20 bg-green-500/10 text-green-400'
+              : 'border-red-500/20 bg-red-500/10 text-red-400'
+          }`}
+        >
+          {message.text}
         </div>
       )}
 
-      {/* Modal - Sade ve scrollable */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm pt-10">
-          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 shadow-xl max-h-[85vh] flex flex-col">
-            {/* Sabit Başlık */}
-            <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-700">
-              <h3 className="text-lg font-semibold text-white">
-                {editingMarketplace ? 'Pazaryerini Düzenle' : 'Yeni Pazaryeri Ekle'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => { setShowModal(false); setEditingMarketplace(null); resetForm(); }}
-                className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+      {/* KPI Kartları */}
+      <KPISection stats={stats} />
 
-            {/* Scrollable İçerik */}
-            <form onSubmit={handleSubmit} className="overflow-y-auto p-6 pt-4 space-y-4 flex-1">
-              {/* Pazaryeri Adı */}
+      {/* Pazaryeri Listesi veya Boş Durum */}
+      {loading ? (
+        <div className="flex items-center justify-center p-12 text-slate-400">Yükleniyor...</div>
+      ) : marketplaces.length === 0 ? (
+        <EmptyState onAdd={openAddModal} />
+      ) : (
+        <MarketplaceTable
+          items={marketplaces}
+          onTest={handleTestConnection}
+          onSync={(key) => handleSyncNow(key)}
+          onEdit={openEditModal}
+          onDelete={handleDelete}
+          onDetail={openDetail}
+          testingIds={testingIds}
+        />
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <AddEditModal
+          formData={formData}
+          editingId={editingId}
+          submitting={submitting}
+          onChange={handleFormChange}
+          onSubmit={handleSubmit}
+          onClose={closeModal}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   SUB-COMPONENTS
+   ============================================================ */
+
+/* ---- KPI Bölümü ---------------------------------------- */
+function KPISection({ stats }: { stats: MarketplaceStats | null }) {
+  const items = [
+    { title: 'Toplam Pazaryeri', value: stats?.total ?? 0, subtitle: 'Kayıtlı pazaryeri', icon: '🛒', color: 'blue' as const },
+    { title: 'Bağlı', value: stats?.connected ?? 0, subtitle: 'API bağlantısı aktif', icon: '🔗', color: 'green' as const },
+    { title: 'Bağlantı Hatası', value: stats?.connectionError ?? 0, subtitle: 'Bağlantı sorunu olan', icon: '⚠️', color: 'red' as const },
+    { title: 'API Hatası', value: stats?.apiError ?? 0, subtitle: 'API yetki/limit hatası', icon: '🚫', color: 'red' as const },
+    { title: 'Gönderilen Ürün', value: (stats?.sentProducts ?? 0).toLocaleString('tr-TR'), subtitle: 'Pazaryerine gönderilen', icon: '📤', color: 'green' as const },
+    { title: 'Bekleyen', value: (stats?.pendingProducts ?? 0).toLocaleString('tr-TR'), subtitle: 'Senkronizasyon bekleyen', icon: '⏳', color: 'yellow' as const },
+    { title: 'Başarısız', value: (stats?.failedProducts ?? 0).toLocaleString('tr-TR'), subtitle: 'Hata alan ürünler', icon: '❌', color: 'red' as const },
+    { title: 'Başarılı', value: (stats?.successfulProducts ?? 0).toLocaleString('tr-TR'), subtitle: 'Başarıyla senkronize', icon: '✅', color: 'green' as const },
+  ];
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {items.map((item) => (
+        <KpiCard key={item.title} {...item} />
+      ))}
+    </div>
+  );
+}
+
+/* ---- Boş Durum ----------------------------------------- */
+function EmptyState({ onAdd }: { onAdd: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-800/50 p-12 backdrop-blur-sm">
+      <div className="text-5xl mb-4">🛒</div>
+      <h3 className="text-lg font-semibold text-white">Henüz Pazaryeri Eklenmemiş</h3>
+      <p className="mt-1 text-sm text-slate-400">İlk pazaryerini ekleyerek entegrasyonları başlatın</p>
+      <button
+        type="button"
+        onClick={onAdd}
+        className="mt-6 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+      >
+        + İlk Pazaryerini Ekle
+      </button>
+    </div>
+  );
+}
+
+/* ---- Pazaryeri Tablosu ---------------------------------- */
+function MarketplaceTable({
+  items,
+  onTest,
+  onSync,
+  onEdit,
+  onDelete,
+  onDetail,
+  testingIds,
+}: {
+  items: MarketplaceItem[];
+  onTest: (id: string) => void;
+  onSync: (key: string) => void;
+  onEdit: (mp: MarketplaceItem) => void;
+  onDelete: (id: string, name: string) => void;
+  onDetail: (mp: MarketplaceItem) => void;
+  testingIds: Record<string, boolean>;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-700 bg-slate-800/80">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Pazaryeri</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">API Durumu</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Token</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Son Senk.</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Ürün / Sipariş</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Durum</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">İşlemler</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700/50">
+            {items.map((mp) => {
+              const apiStatus = getApiStatusLabel(mp.apiStatus);
+              const tokenStatus = getTokenStatusLabel(mp.tokenStatus);
+              return (
+                <tr
+                  key={mp.id}
+                  className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors cursor-pointer"
+                  onClick={() => onDetail(mp)}
+                >
+                  {/* Pazaryeri Adı & Logo */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{getMarketplaceLogo(mp.key)}</span>
+                      <div>
+                        <div className="text-sm font-medium text-white">{mp.name}</div>
+                        <div className="text-xs text-slate-500">{mp.key}</div>
+                      </div>
+                    </div>
+                  </td>
+
+                  {/* API Durumu */}
+                  <td className="px-4 py-3">
+                    <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${apiStatus.color}`}>
+                      {apiStatus.label}
+                    </span>
+                  </td>
+
+                  {/* Token Durumu */}
+                  <td className="px-4 py-3">
+                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${tokenStatus.color}`}>
+                      {tokenStatus.label}
+                    </span>
+                  </td>
+
+                  {/* Son Senkronizasyon */}
+                  <td className="px-4 py-3">
+                    <div className="text-sm text-slate-300">{formatDate(mp.lastSyncAt)}</div>
+                    <div className="text-xs text-slate-500">
+                      {mp.lastSyncAt
+                        ? `Oluşturma: ${formatDate(mp.createdAt)}`
+                        : 'Henüz senkronize edilmedi'}
+                    </div>
+                  </td>
+
+                  {/* Ürün / Sipariş Sayısı */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-slate-300" title="Ürün Sayısı">📦 {mp.productCount ?? 0}</span>
+                      <span className="text-slate-300" title="Sipariş Sayısı">📑 {mp.orderCount ?? 0}</span>
+                    </div>
+                  </td>
+
+                  {/* Durum */}
+                  <td className="px-4 py-3">
+                    {mp.active ? (
+                      <span className="flex items-center gap-1.5 text-sm text-green-400">
+                        <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
+                        Aktif
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-sm text-slate-400">
+                        <span className="flex h-2 w-2 rounded-full bg-slate-500"></span>
+                        Pasif
+                      </span>
+                    )}
+                  </td>
+
+                  {/* İşlemler */}
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => onTest(mp.id)}
+                        disabled={testingIds[mp.id]}
+                        className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                        title="Bağlantı Testi"
+                      >
+                        {testingIds[mp.id] ? '⏳' : '🔌 Test'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSync(mp.key)}
+                        className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 transition-colors"
+                        title="Senkronize Et"
+                      >
+                        🔄 Sync
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onEdit(mp)}
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+                        title="Düzenle"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(mp.id, mp.name)}
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                        title="Sil"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   DETAY GÖRÜNÜMÜ
+   ============================================================ */
+
+function DetailView({
+  mp,
+  activeTab,
+  syncLogs,
+  syncLogsLoading,
+  onDetailTabChange,
+  onClose,
+  onSyncNow,
+  onTestConnection,
+  onEdit,
+}: {
+  mp: MarketplaceItem;
+  activeTab: DetailTab;
+  syncLogs: SyncLog[];
+  syncLogsLoading: boolean;
+  onDetailTabChange: (tab: DetailTab) => void;
+  onClose: () => void;
+  onSyncNow: (key: string) => void;
+  onTestConnection: (id: string) => void;
+  onEdit: () => void;
+}) {
+  const apiStatus = getApiStatusLabel(mp.apiStatus);
+  const tokenStatus = getTokenStatusLabel(mp.tokenStatus);
+
+  const tabs: { key: DetailTab; label: string; icon: string }[] = [
+    { key: 'settings', label: 'Ayarlar', icon: '⚙️' },
+    { key: 'sync', label: 'Senkronizasyon', icon: '🔄' },
+    { key: 'logs', label: 'Loglar', icon: '📝' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Geri ve Başlık */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
+            title="Geri Dön"
+          >
+            ←
+          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">{getMarketplaceLogo(mp.key)}</span>
+            <div>
+              <h2 className="text-lg font-semibold text-white">{mp.name}</h2>
+              <p className="text-sm text-slate-400">{mp.key}</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onTestConnection(mp.id)}
+            className="rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+          >
+            🔌 Bağlantı Testi
+          </button>
+          <button
+            type="button"
+            onClick={() => onSyncNow(mp.key)}
+            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+          >
+            🔄 Senkronize Et
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+          >
+            ✏️ Düzenle
+          </button>
+        </div>
+      </div>
+
+      {/* Durum Kartı */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 backdrop-blur-sm">
+          <div className="text-xs text-slate-400">API Durumu</div>
+          <div className="mt-1">
+            <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${apiStatus.color}`}>
+              {apiStatus.label}
+            </span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 backdrop-blur-sm">
+          <div className="text-xs text-slate-400">Token Durumu</div>
+          <div className="mt-1">
+            <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${tokenStatus.color}`}>
+              {tokenStatus.label}
+            </span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 backdrop-blur-sm">
+          <div className="text-xs text-slate-400">Ortam</div>
+          <div className="mt-1 text-sm font-medium text-white">
+            {mp.environment === 'production' ? '🚀 Production' : '🧪 Sandbox'}
+          </div>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 backdrop-blur-sm">
+          <div className="text-xs text-slate-400">Durum</div>
+          <div className="mt-1 flex items-center gap-1.5 text-sm font-medium text-white">
+            {mp.active ? (
+              <>
+                <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
+                Aktif
+              </>
+            ) : (
+              <>
+                <span className="flex h-2 w-2 rounded-full bg-slate-500"></span>
+                Pasif
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sekmeler */}
+      <div className="border-b border-slate-700">
+        <div className="flex gap-6">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => onDetailTabChange(tab.key)}
+              className={`flex items-center gap-2 border-b-2 px-1 py-3 text-sm font-medium transition-colors ${
+                activeTab === tab.key
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Sekme İçeriği */}
+      {activeTab === 'settings' && <SettingsTab mp={mp} />}
+      {activeTab === 'sync' && <SyncTab mp={mp} onSyncNow={() => onSyncNow(mp.key)} />}
+      {activeTab === 'logs' && <LogsTab logs={syncLogs} loading={syncLogsLoading} />}
+    </div>
+  );
+}
+
+/* ---- Ayarlar Sekmesi ----------------------------------- */
+function SettingsTab({ mp }: { mp: MarketplaceItem }) {
+  let settings: Record<string, string> = {};
+  if (mp.settings) {
+    try { settings = JSON.parse(mp.settings); } catch { /* ignore */ }
+  }
+
+  const fields: { label: string; value: string | null; sensitive?: boolean }[] = [
+    { label: 'API Key', value: mp.apiKey || settings.apiKey, sensitive: true },
+    { label: 'API Secret', value: mp.apiSecret || settings.apiSecret, sensitive: true },
+    { label: 'Client ID', value: mp.clientId || settings.clientId, sensitive: true },
+    { label: 'Merchant ID', value: mp.merchantId || settings.merchantId, sensitive: true },
+    { label: 'Token', value: mp.token || settings.token, sensitive: true },
+    { label: 'Webhook URL', value: mp.webhookUrl || settings.webhookUrl },
+    { label: 'Ortam', value: mp.environment || settings.environment },
+    { label: 'API URL', value: mp.apiUrl || settings.apiUrl },
+  ];
+
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
+      <h3 className="mb-4 text-sm font-semibold text-slate-300">API Yapılandırması</h3>
+      <div className="grid gap-4 md:grid-cols-2">
+        {fields.map((field) => (
+          <div key={field.label} className="rounded-lg border border-slate-700 bg-slate-800/80 p-4">
+            <div className="text-xs text-slate-400">{field.label}</div>
+            <div className="mt-1 text-sm font-medium text-white truncate">
+              {field.value
+                ? field.sensitive
+                  ? `${field.value.substring(0, 4)}${'•'.repeat(Math.min(16, field.value.length - 4))}`
+                  : field.value
+                : <span className="text-slate-500 italic">Tanımlanmamış</span>
+              }
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Senkronizasyon Sekmesi ----------------------------- */
+function SyncTab({ mp, onSyncNow }: { mp: MarketplaceItem; onSyncNow: () => void }) {
+  const syncTypes = [
+    { label: 'Ürün Senkronizasyonu', desc: 'Ürünleri pazaryerine gönder', icon: '📦', action: 'Ürünleri Senkronize Et' },
+    { label: 'Stok Senkronizasyonu', desc: 'Stok bilgilerini güncelle', icon: '📊', action: 'Stokları Senkronize Et' },
+    { label: 'Fiyat Senkronizasyonu', desc: 'Fiyat bilgilerini güncelle', icon: '💰', action: 'Fiyatları Senkronize Et' },
+    { label: 'Sipariş Senkronizasyonu', desc: 'Siparişleri pazaryerinden çek', icon: '📑', action: 'Siparişleri Senkronize Et' },
+    { label: 'Toplu Senkronizasyon', desc: 'Tüm verileri senkronize et', icon: '🔄', action: 'Tümünü Senkronize Et' },
+  ];
+
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-6 backdrop-blur-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-slate-300">Senkronizasyon İşlemleri</h3>
+        <div className="text-xs text-slate-500">
+          Son Senkronizasyon: {formatDate(mp.lastSyncAt)}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {syncTypes.map((item) => (
+          <div
+            key={item.label}
+            className="rounded-lg border border-slate-700 bg-slate-800/80 p-4 hover:border-slate-600 transition-colors"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-2xl">{item.icon}</span>
+              <div>
+                <div className="text-sm font-medium text-white">{item.label}</div>
+                <div className="text-xs text-slate-400">{item.desc}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onSyncNow}
+              className="w-full rounded-lg bg-blue-600/80 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 transition-colors"
+            >
+              {item.action}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Loglar Sekmesi ------------------------------------- */
+function LogsTab({ logs, loading }: { logs: SyncLog[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-12 text-slate-400">Loglar yükleniyor...</div>
+    );
+  }
+
+  if (logs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-800/50 p-12 backdrop-blur-sm">
+        <div className="text-4xl mb-3">📝</div>
+        <h3 className="text-sm font-semibold text-slate-300">Henüz Log Kaydı Yok</h3>
+        <p className="text-xs text-slate-400 mt-1">Senkronizasyon işlemleri burada görünecek</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-800/50 backdrop-blur-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-slate-700 bg-slate-800/80">
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Tip</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Durum</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Mesaj</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Öğe Sayısı</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Başlangıç</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Bitiş</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700/50">
+            {logs.map((log) => (
+              <tr key={log.id} className="bg-slate-800/30 hover:bg-slate-700/30 transition-colors">
+                <td className="px-4 py-3 text-sm text-slate-300">{getSyncStatusIcon(log.type)} {log.type}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    log.status === 'success'
+                      ? 'bg-green-500/10 text-green-400'
+                      : log.status === 'error'
+                      ? 'bg-red-500/10 text-red-400'
+                      : log.status === 'running'
+                      ? 'bg-blue-500/10 text-blue-400'
+                      : 'bg-yellow-500/10 text-yellow-400'
+                  }`}>
+                    {getSyncStatusIcon(log.status)}
+                    {log.status === 'success' ? 'Başarılı' : log.status === 'error' ? 'Hata' : log.status === 'running' ? 'Çalışıyor' : 'Bekliyor'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-300 max-w-[250px] truncate">{log.message || '-'}</td>
+                <td className="px-4 py-3 text-sm text-slate-300">{log.itemCount}</td>
+                <td className="px-4 py-3 text-sm text-slate-400">{formatDate(log.startedAt)}</td>
+                <td className="px-4 py-3 text-sm text-slate-400">{formatDate(log.completedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   EKLE / DÜZENLE MODAL
+   ============================================================ */
+
+function AddEditModal({
+  formData,
+  editingId,
+  submitting,
+  onChange,
+  onSubmit,
+  onClose,
+}: {
+  formData: MarketplaceFormData;
+  editingId: string | null;
+  submitting: boolean;
+  onChange: (field: keyof MarketplaceFormData, value: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 backdrop-blur-sm pt-10 overflow-y-auto">
+      <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-800 shadow-xl my-10">
+        {/* Sabit Başlık */}
+        <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-700">
+          <div>
+            <h3 className="text-lg font-semibold text-white">
+              {editingId ? 'Pazaryerini Düzenle' : 'Yeni Pazaryeri Ekle'}
+            </h3>
+            <p className="text-sm text-slate-400 mt-1">
+              {editingId
+                ? 'API bilgilerini güncelleyin'
+                : 'Yeni bir pazaryeri entegrasyonu ekleyin'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable İçerik */}
+        <form onSubmit={onSubmit} className="overflow-y-auto p-6 space-y-5 max-h-[65vh]">
+          {/* Temel Bilgiler */}
+          <div>
+            <h4 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <span>📋</span> Temel Bilgiler
+            </h4>
+            <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1">
                   Pazaryeri Adı <span className="text-red-400">*</span>
@@ -379,77 +1057,139 @@ export default function Marketplace() {
                 <input
                   type="text"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => onChange('name', e.target.value)}
                   className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
                   placeholder="Örn: Trendyol, Hepsiburada"
                   required
                 />
               </div>
-
-              {/* API Bilgileri Bölümü */}
-              <div className="border-t border-slate-700 pt-4">
-                <h4 className="text-sm font-medium text-slate-300 mb-3">API Bilgileri</h4>
-                
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">Satıcı ID</label>
-                    <input
-                      type="text"
-                      value={formData.sellerId}
-                      onChange={(e) => setFormData({ ...formData, sellerId: e.target.value })}
-                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
-                      placeholder="Satıcı ID / Cari ID / Merchant Token"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">API Key</label>
-                    <input
-                      type="text"
-                      value={formData.apiKey}
-                      onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
-                      placeholder="API Key / App Key / Access Key"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">API Secret</label>
-                    <input
-                      type="password"
-                      value={formData.apiSecret}
-                      onChange={(e) => setFormData({ ...formData, apiSecret: e.target.value })}
-                      className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
-                      placeholder="API Secret / App Secret"
-                    />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  Key (Otomatik) <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.key}
+                  onChange={(e) => onChange('key', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-slate-300 focus:border-blue-500 focus:outline-none"
+                  placeholder="trendyol"
+                  required
+                />
               </div>
-
-              {message && (
-                <div className={`rounded-lg px-3 py-2 text-sm ${message.startsWith('✅') ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                  {message}
-                </div>
-              )}
-
-              {/* Sabit Butonlar */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-700">
-                <button
-                  type="button"
-                  onClick={() => { setShowModal(false); setEditingMarketplace(null); resetForm(); }}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors"
-                >
-                  İptal
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-                >
-                  {editingMarketplace ? 'Güncelle' : 'Oluştur'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* API Bilgileri */}
+          <div className="border-t border-slate-700 pt-5">
+            <h4 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <span>🔑</span> API Kimlik Bilgileri
+            </h4>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">API Key</label>
+                <input
+                  type="text"
+                  value={formData.apiKey}
+                  onChange={(e) => onChange('apiKey', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  placeholder="API Key / App Key"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">API Secret</label>
+                <input
+                  type="password"
+                  value={formData.apiSecret}
+                  onChange={(e) => onChange('apiSecret', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  placeholder="API Secret / App Secret"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Client ID</label>
+                <input
+                  type="text"
+                  value={formData.clientId}
+                  onChange={(e) => onChange('clientId', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  placeholder="Client ID (varsa)"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Merchant ID</label>
+                <input
+                  type="text"
+                  value={formData.merchantId}
+                  onChange={(e) => onChange('merchantId', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  placeholder="Merchant ID / Satıcı Kodu"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Token</label>
+                <input
+                  type="password"
+                  value={formData.token}
+                  onChange={(e) => onChange('token', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  placeholder="API Token / Bearer Token"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Ortam</label>
+                <select
+                  value={formData.environment}
+                  onChange={(e) => onChange('environment', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="production">🚀 Production</option>
+                  <option value="sandbox">🧪 Sandbox (Test)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Webhook */}
+          <div className="border-t border-slate-700 pt-5">
+            <h4 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <span>🔗</span> Webhook & Bağlantı
+            </h4>
+            <div className="grid gap-4 md:grid-cols-1">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Webhook URL</label>
+                <input
+                  type="url"
+                  value={formData.webhookUrl}
+                  onChange={(e) => onChange('webhookUrl', e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
+                  placeholder="https://example.com/webhook"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Pazaryeri tarafından gönderilen bildirimlerin alınacağı URL
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Butonlar */}
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-700">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+            >
+              İptal
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !formData.name.trim()}
+              className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? '⏳ İşleniyor...' : editingId ? '💾 Güncelle' : '➕ Oluştur'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

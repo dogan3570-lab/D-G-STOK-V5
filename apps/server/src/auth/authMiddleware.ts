@@ -10,7 +10,26 @@ export type AuthedRequest = Request & {
 };
 
 export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
-  const token = req.cookies?.token;
+  // Token'ı birden çok kaynaktan dene:
+  // 1. Cookie (httpOnly, proxy ile iletilir)
+  // 2. Authorization header (Bearer token)
+  // 3. x-auth-token header (Vite proxy tarafından iletilen özel header)
+  // 4. x-token header (alternatif)
+  let token = req.cookies?.token;
+  
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7);
+    }
+  }
+
+  // Vite proxy Authorization header'ını iletmeyebilir,
+  // bu yüzden alternatif header'ları da kontrol et
+  if (!token) {
+    token = (req.headers['x-auth-token'] as string) || (req.headers['x-token'] as string);
+  }
+
   if (!token) {
     return res.status(401).json({
       ok: false,

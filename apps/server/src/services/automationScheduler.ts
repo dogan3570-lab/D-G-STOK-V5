@@ -91,6 +91,16 @@ async function executeRule(rule: any) {
         for (const source of xmlSources) {
           if (!source.url) continue;
           
+          // Son sync'in üzerinden yeterli süre geçti mi kontrol et
+          const lastRun = source.lastRunAt ? new Date(source.lastRunAt).getTime() : 0;
+          const now = Date.now();
+          const minIntervalMs = (source.scheduleIntervalMinutes || 60) * 60 * 1000;
+          
+          if (lastRun > 0 && (now - lastRun) < minIntervalMs) {
+            console.log(`[Scheduler] Skipping "${source.name}" - last sync was ${Math.round((now - lastRun) / 1000)}s ago (min ${source.scheduleIntervalMinutes}m)`);
+            continue;
+          }
+          
           try {
             const xmlContent = await fetchXmlFromUrl(source.url);
             const result = await importXmlProducts(xmlContent, {
