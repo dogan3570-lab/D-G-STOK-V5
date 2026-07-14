@@ -511,11 +511,103 @@ model TitleTemplate {
   updatedAt     DateTime  @updatedAt
 }
 
+// ==================== AI CONTENT COMPLIANCE ENGINE ====================
+
 model ForbiddenWord {
   id            String    @id @default(uuid())
   word          String    @unique
-  marketplaces  String?   // Hangi pazaryerleri için (JSON array)
+  category      String    @default("OTHER") // MARKETING | SWEAR | COMMUNICATION | COMPETITOR | SPAM | OTHER
+  riskLevel     String    @default("HIGH") // LOW | MEDIUM | HIGH | CRITICAL
+  marketplaces  String?   // JSON array
+  isActive      Boolean   @default(true)
+  autoFix       String?   // Otomatik düzeltme metni
   createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model ForbiddenWordGroup {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  words       String?  // JSON array
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model MarketplaceContentProfile {
+  id                String   @id @default(uuid())
+  marketplaceKey    String   @unique
+  marketplaceName   String
+
+  // Başlık
+  maxTitleLength    Int      @default(150)
+  minTitleLength    Int      @default(10)
+  forbiddenChars    String?  // JSON
+  emojiPolicy       String   @default("REMOVE")
+  maxUppercaseRatio Float    @default(0.3)
+
+  // HTML
+  allowHtml         Boolean  @default(false)
+  allowedHtmlTags   String?  // JSON
+
+  // Görsel
+  minImageWidth     Int      @default(800)
+  minImageHeight    Int      @default(800)
+  maxImageWidth     Int      @default(5000)
+  maxImageHeight    Int      @default(5000)
+  whiteBackground   Boolean  @default(true)
+
+  // Barkod
+  barcodeRequired   Boolean  @default(true)
+  barcodeFormat     String?
+
+  requiredAttributes String? // JSON
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model ContentAnalysisResult {
+  id              String   @id @default(uuid())
+  productId       String
+  marketplaceKey  String?
+
+  // Skorlar
+  totalScore      Int      @default(0)
+  titleScore      Int      @default(100)
+  descScore       Int      @default(100)
+  imageScore      Int      @default(100)
+  barcodeScore    Int      @default(100)
+  priceScore      Int      @default(100)
+
+  // Sorunlar
+  issues          String?  // JSON
+  aiSuggestions   String?  // JSON
+  autoFixed       Boolean  @default(false)
+  fixLog          String?  // JSON
+
+  // AI önerileri
+  aiConfidence    Int      @default(0)
+  aiSuggestedTitle String?
+  aiSuggestedDesc  String?
+
+  status          String   @default("PENDING") // PENDING | AUTO_FIXED | AWAITING_APPROVAL | FAILED | PASSED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([productId])
+  @@index([status])
+}
+
+model ApiErrorLog {
+  id              String   @id @default(uuid())
+  productId       String
+  marketplaceKey  String
+  errorCode       String
+  errorMessage    String
+  rejectedField   String?  // title | description | image | price
+  aiLearnedRule   String?  // AI öğrenilen kural
+  applied         Boolean  @default(false)
+  createdAt       DateTime @default(now())
 }
 
 model WorkflowState {

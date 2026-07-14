@@ -25,6 +25,7 @@ import pipelineRoutes from './pipeline.ts';
 import listingsRoutes from './listings.ts';
 import variantsV2Router from './variantsV2.ts';
 import variantsV4Router from './variantsV4.ts';
+import contentEngineRouter from './contentEngine.ts';
 
 export const router = Router();
 
@@ -67,6 +68,7 @@ router.use('/pipeline', pipelineRoutes);
 router.use('/listings', listingsRoutes);
 router.use('/variants/v2', variantsV2Router);
 router.use('/variants/v4', variantsV4Router);
+router.use('/content', contentEngineRouter);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
