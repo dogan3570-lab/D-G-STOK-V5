@@ -54,31 +54,66 @@ router.get('/list', requireAuth, async (req, res) => {
     const page = Math.max(1, parseInt(String(req.query.page || '1')));
     const limit = Math.min(1000, Math.max(10, parseInt(String(req.query.limit || '50'))));
     const search = String(req.query.search || '').trim();
+    const filter = String(req.query.filter || 'all');
 
-    // Brand.name uzerinden grupla (XML markalari Brand tablosunda)
-    const brandGroups = await prisma.product.groupBy({
-      by: ['brandId'],
-      where: { brandId: { not: null } },
-      _count: { id: true },
-      orderBy: { _count: { id: 'desc' } },
+    // V1'de calisan yontem: distinct brandId ile product'lari bul
+    const where: any = { brandId: { not: null } };
+    if (search) where.brand = { name: { contains: search } };
+
+    // Benzersiz XML markalarini bul (distinct brandId)
+    const products = await prisma.product.findMany({
+      where,
+      select: { brandId: true, brand: { select: { name: true } } },
+      distinct: ['brandId'],
     });
 
-    // Marka detaylarini al
-    const brandIds = brandGroups.map(g => g.brandId).filter((b): b is string => b !== null);
-    const brands = brandIds.length > 0 ? await prisma.brand.findMany({
-      where: { id: { in: brandIds } },
-      select: { id: true, name: true },
-    }) : [];
-    const brandMap = new Map(brands.map(b => [b.id, b.name]));
-
-    // Filter
-    let filtered = brandGroups;
-    if (search) {
-      filtered = brandGroups.filter(g => {
-        const name = brandMap.get(g.brandId!) || '';
-        return name.toLowerCase().includes(search.toLowerCase());
-      });
+    // Her marka icin urun sayisini hesapla
+    const brandCounts = new Map<string, { name: string; count: number }>();
+    for (const p of products) {
+      if (p.brandId && p.brand?.name) {
+        const existing = brandCounts.get(p.brandId);
+        if (existing) {
+          // Count'u ayri bir sorguyla al
+        } else {
+          brandCounts.set(p.brandId, { name: p.brand.name, count: 0 });
+        }
+      }
     }
+
+    // Her marka icin toplam urun sayisini al
+    const brandIds = Array.from(brandCounts.keys());
+    const counts = await Promise.all(
+      brandIds.map(id =>
+        prisma.product.count({ where: { brandId: id } })
+          .then(c => ({ id, count: c }))
+      )
+    );
+    for (const c of counts) {
+      const entry = brandCounts.get(c.id);
+      if (entry) entry.count = c.count;
+    }
+
+    // Her marka icin eslesme durumunu kontrol et
+    let items = await Promise.all(
+      Array.from(brandCounts.entries())
+        .filter(([_, v]) => !search || v.name.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice((page - 1) * limit, page * limit)
+        .map(async ([brandId, info]) => {
+          const mapping = await prisma.brandMapping.findFirst({ where: { dgBrandId: brandId } });
+          const matchedCount = await prisma.product.count({ where: { brandId, brandMatch: true } });
+          return {
+            xmlBrand: info.name,
+            productCount: info.count,
+            matchedCount,
+            matchedBrand: mapping?.dgBrand?.name || info.name,
+            brandType: mapping ? 'Eşleştirilmiş' : 'XML',
+            dgBrandId: brandId,
+          };
+        })
+    );
+
+    const total = brandCounts.size;
 
     const total = filtered.length;
     const paged = filtered.slice((page - 1) * limit, page * limit);
