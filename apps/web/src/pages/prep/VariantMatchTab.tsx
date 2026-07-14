@@ -7,6 +7,35 @@ import { showToast } from '../../components/ui/Toast';
 
 // ==================== TYPES ====================
 
+// Backend'den gelen gerçek response yapısı (VariantScreenProduct)
+// Tüm alanlar optional - crash önlemek için
+interface VariantAnalysisItem {
+  id: string;
+  sku?: string | null;
+  xmlKey?: string;
+  title?: string | null;
+  barcode?: string | null;
+  brandName?: string | null;
+  categoryName?: string | null;
+  xmlSourceName?: string | null;
+  confidence: number;
+  status: 'AUTO_ACCEPTED' | 'AUTO_SUGGEST' | 'MANUAL_REVIEW' | 'ERROR';
+  reason?: string | null;
+  suggestedAction?: string | null;
+  hasColor?: boolean;
+  hasSize?: boolean;
+  hasNumber?: boolean;
+  parentSku?: string | null;
+  groupId?: string | null;
+  // Eski alanlar (opsiyonel)
+  productId?: string;
+  source?: string;
+  checks?: Record<string, boolean>;
+  errors?: string[];
+  warnings?: string[];
+  xmlHasParent?: boolean;
+}
+
 interface V2Stats {
   totalProducts: number;
   xmlVariant: number;      // AUTO_ACCEPTED
@@ -20,20 +49,6 @@ interface XmlSource {
   id: string;
   name: string;
   active?: boolean;
-}
-
-interface VariantAnalysisItem {
-  productId: string;
-  confidence: number;
-  source: 'XML_PARENT' | 'AI_MATCH' | 'AUTO_CREATED' | 'MANUAL';
-  status: 'AUTO_ACCEPTED' | 'AUTO_SUGGEST' | 'MANUAL_REVIEW' | 'ERROR';
-  reason: string | null;
-  parentSku: string | null;
-  groupId: string | null;
-  xmlHasParent: boolean;
-  checks: Record<string, boolean>;
-  errors: string[];
-  warnings: string[];
 }
 
 interface ProductDetail {
@@ -57,11 +72,21 @@ interface ProblemRow {
   product?: ProductDetail;
 }
 
-// Kullanıcının müdahale edebileceği ürünler (MANUAL_REVIEW + ERROR)
-// MANUAL_REVIEW: manuel inceleme gereken ürünler
-// ERROR: kullanıcının düzeltmesi gereken hatalı ürünler
-const PROBLEM_STATUSES = ['MANUAL_REVIEW', 'ERROR'] as const;
 const PAGE_SIZE = 50;
+// Kullanıcının müdahale edebileceği ürünler (MANUAL_REVIEW + ERROR)
+const PROBLEM_STATUSES = ['MANUAL_REVIEW', 'ERROR'] as const;
+
+// ==================== HELPERS ====================
+
+/** Güvenli id al - backend hem id hem productId dönebilir */
+function getItemId(a: VariantAnalysisItem): string {
+  return a.id || a.productId || '';
+}
+
+/** Null-safe array */
+function safeArr(arr: unknown[] | undefined | null): unknown[] {
+  return Array.isArray(arr) ? arr : [];
+}
 
 // ==================== COMPONENT ====================
 
@@ -100,11 +125,10 @@ export default function VariantMatchTab() {
     if (res.ok && res.data) setThresholds(res.data.items);
   }, []);
 
-  // Sorunlu ürünleri getir (3 status ayrı ayrı çekilir)
+  // Sorunlu ürünleri getir
   const fetchProblems = useCallback(async () => {
     setLoading(true);
     try {
-      // Her status için ayrı çağrı
       const promises = PROBLEM_STATUSES.map(status => {
         const params = new URLSearchParams({
           status,
@@ -128,7 +152,7 @@ export default function VariantMatchTab() {
         }
       }
 
-      // Ürün detaylarını da çek (varsa XML kaynağı seçiliyse)
+      // Ürün detaylarını da çek
       let productMap = new Map<string, ProductDetail>();
       if (selectedXmlId && allItems.length > 0) {
         const prodRes = await apiFetch<{ items: ProductDetail[] }>(
@@ -141,10 +165,10 @@ export default function VariantMatchTab() {
         }
       }
 
-      // Row'ları oluştur
+      // Row'ları oluştur - id'yi productId olarak kullan
       const problemRows: ProblemRow[] = allItems.map(item => ({
         analysis: item,
-        product: productMap.get(item.productId),
+        product: productMap.get(getItemId(item)),
       }));
 
       setRows(problemRows);
@@ -213,7 +237,7 @@ export default function VariantMatchTab() {
     setSelectedIds(prev =>
       prev.size === rows.length
         ? new Set()
-        : new Set(rows.map(r => r.analysis.productId))
+        : new Set(rows.map(r => getItemId(r.analysis)))
     );
   };
 
@@ -258,8 +282,10 @@ export default function VariantMatchTab() {
 
   const selectedProduct = useMemo(() => {
     if (!selectedProductId) return null;
-    return rows.find(r => r.analysis.productId === selectedProductId) || null;
+    return rows.find(r => getItemId(r.analysis) === selectedProductId) || null;
   }, [selectedProductId, rows]);
+
+  const allSelected = rows.length > 0 && selectedIds.size === rows.length;
 
   // ---- RENDER ----
 
@@ -337,7 +363,7 @@ export default function VariantMatchTab() {
         <button
           onClick={handleScan}
           disabled={scanning || !selectedXmlId}
-          className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+          className="rounded-lg px-4 py-1.5 text-xs font-medium bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
         >
           {scanning ? (
             <>
@@ -345,35 +371,29 @@ export default function VariantMatchTab() {
               Taranıyor...
             </>
           ) : (
-            <>
-              <span>🔄</span>
-              Varyantları Tara
-            </>
+            '🔍 Varyantları Tara'
           )}
         </button>
       </div>
 
-      {/* ===== ANA İÇERİK (Grid + Drawer) ===== */}
-      <div className="flex gap-4">
-        {/* Grid Bölümü */}
-        <div
-          className={`flex-1 min-w-0 rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden ${
-            selectedProductId ? 'hidden xl:block' : ''
-          }`}
-        >
-          <div className="px-4 py-2.5 border-b border-slate-700 bg-slate-800/50 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <span>🔍</span>
-              Varyant Doğrulama Sonuçları
-              <span className="text-xs font-normal text-slate-400">
-                ({total} ürün)
-              </span>
-            </h3>
-            {total > PAGE_SIZE && (
-              <div className="flex items-center gap-1 text-xs">
+      {/* ===== ANA İÇERİK ===== */}
+      <div className="flex flex-col xl:flex-row gap-4">
+        {/* ===== SOL: TABLO ===== */}
+        <div className="flex-1 min-w-0 rounded-xl border border-slate-700 bg-slate-800/30 backdrop-blur-sm overflow-hidden">
+          {/* Tablo header toolbar */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/50 bg-slate-800/60">
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <span className="text-xs text-blue-400 font-medium">
+                  {selectedIds.size} seçili
+                </span>
+              )}
+            </div>
+            {total > 0 && (
+              <div className="flex items-center gap-1 text-xs text-slate-500">
                 <button
                   onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
+                  disabled={page <= 1}
                   className="px-2 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-40"
                 >
                   ◀
@@ -399,7 +419,7 @@ export default function VariantMatchTab() {
                   <th className="w-10 px-3 py-2.5 text-left">
                     <input
                       type="checkbox"
-                      checked={selectedIds.size === rows.length && rows.length > 0}
+                      checked={allSelected}
                       onChange={toggleSelectAll}
                       className="rounded border-slate-500 bg-slate-700 text-blue-600 focus:ring-blue-500"
                     />
@@ -441,27 +461,30 @@ export default function VariantMatchTab() {
                   rows.map(row => {
                     const a = row.analysis;
                     const p = row.product;
+                    const itemId = getItemId(a);
                     const badge = getStatusBadge(a.status);
+                    const errs = safeArr(a.errors);
+                    const warns = safeArr(a.warnings);
                     return (
                       <tr
-                        key={a.productId}
+                        key={itemId}
                         className={`hover:bg-slate-700/20 border-b border-slate-700/30 cursor-pointer ${
-                          selectedProductId === a.productId ? 'bg-slate-700/30' : ''
+                          selectedProductId === itemId ? 'bg-slate-700/30' : ''
                         }`}
-                        onClick={() => setSelectedProductId(a.productId)}
+                        onClick={() => setSelectedProductId(itemId)}
                       >
                         <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                           <input
                             type="checkbox"
-                            checked={selectedIds.has(a.productId)}
-                            onChange={() => toggleSelect(a.productId)}
+                            checked={selectedIds.has(itemId)}
+                            onChange={() => toggleSelect(itemId)}
                             className="rounded border-slate-500 bg-slate-700 text-blue-600 focus:ring-blue-500"
                           />
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex flex-col">
-                            <span className="text-xs font-medium text-white truncate max-w-[200px]" title={p?.title || a.productId}>
-                              {p?.title || a.productId}
+                            <span className="text-xs font-medium text-white truncate max-w-[200px]" title={p?.title || a.title || itemId}>
+                              {p?.title || a.title || itemId}
                             </span>
                             {p?.sku && (
                               <code className="text-[10px] font-mono text-cyan-300 mt-0.5">
@@ -469,27 +492,27 @@ export default function VariantMatchTab() {
                               </code>
                             )}
                             <code className="text-[10px] font-mono text-slate-500">
-                              {p?.xmlKey || a.productId}
+                              {p?.xmlKey || a.xmlKey || itemId}
                             </code>
                           </div>
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="text-xs text-slate-300">
-                            {p?.xmlSource?.name || (
+                            {p?.xmlSource?.name || a.xmlSourceName || (
                               <span className="text-slate-500">-</span>
                             )}
                           </span>
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="text-xs text-slate-300">
-                            {p?.brand?.name || (
+                            {p?.brand?.name || a.brandName || (
                               <span className="text-slate-500">-</span>
                             )}
                           </span>
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="text-xs text-slate-300">
-                            {p?.category?.name || (
+                            {p?.category?.name || a.categoryName || (
                               <span className="text-slate-500">-</span>
                             )}
                           </span>
@@ -525,7 +548,6 @@ export default function VariantMatchTab() {
                               %{a.confidence}
                             </span>
                           </div>
-                          {/* Progress bar */}
                           <div className="w-16 h-1 bg-slate-700 rounded-full mt-1 overflow-hidden">
                             <div
                               className={`h-full rounded-full transition-all ${
@@ -541,18 +563,18 @@ export default function VariantMatchTab() {
                         </td>
                         <td className="px-3 py-2.5">
                           <span className="text-[11px] text-slate-400 max-w-[150px] inline-block truncate" title={a.reason || ''}>
-                            {a.reason || (
+                            {a.reason || a.suggestedAction || (
                               <span className="text-slate-600">-</span>
                             )}
                           </span>
-                          {a.errors.length > 0 && (
+                          {errs.length > 0 && (
                             <div className="text-[10px] text-red-400 mt-0.5">
-                              ⚠️ {a.errors.length} hata
+                              ⚠️ {errs.length} hata
                             </div>
                           )}
-                          {a.warnings.length > 0 && a.errors.length === 0 && (
+                          {warns.length > 0 && errs.length === 0 && (
                             <div className="text-[10px] text-yellow-400 mt-0.5">
-                              ⚠️ {a.warnings.length} uyarı
+                              ⚠️ {warns.length} uyarı
                             </div>
                           )}
                         </td>
@@ -568,12 +590,12 @@ export default function VariantMatchTab() {
                             onClick={e => {
                               e.stopPropagation();
                               setSelectedProductId(
-                                selectedProductId === a.productId ? null : a.productId
+                                selectedProductId === itemId ? null : itemId
                               );
                             }}
                             className="text-slate-500 hover:text-white transition-colors"
                           >
-                            {selectedProductId === a.productId ? '▶' : '◀'}
+                            {selectedProductId === itemId ? '▶' : '◀'}
                           </button>
                         </td>
                       </tr>
@@ -606,24 +628,24 @@ export default function VariantMatchTab() {
               {/* Genel Bilgiler */}
               <Section title="📄 Genel Bilgiler">
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <Info label="Ürün ID" value={selectedProduct.analysis.productId} />
+                  <Info label="Ürün ID" value={selectedProduct.analysis.id} />
                   <Info
                     label="Ürün Adı"
-                    value={selectedProduct.product?.title || '-'}
+                    value={selectedProduct.product?.title || selectedProduct.analysis.title || '-'}
                   />
                   <Info
                     label="XML Key"
-                    value={selectedProduct.product?.xmlKey || '-'}
+                    value={selectedProduct.product?.xmlKey || selectedProduct.analysis.xmlKey || '-'}
                     mono
                   />
                   <Info
                     label="SKU"
-                    value={selectedProduct.product?.sku || '-'}
+                    value={selectedProduct.product?.sku || selectedProduct.analysis.sku || '-'}
                     mono
                   />
                   <Info
                     label="Barkod"
-                    value={selectedProduct.product?.barcode || '-'}
+                    value={selectedProduct.product?.barcode || selectedProduct.analysis.barcode || '-'}
                     mono
                   />
                   <Info
@@ -632,15 +654,15 @@ export default function VariantMatchTab() {
                   />
                   <Info
                     label="Marka"
-                    value={selectedProduct.product?.brand?.name || '-'}
+                    value={selectedProduct.product?.brand?.name || selectedProduct.analysis.brandName || '-'}
                   />
                   <Info
                     label="Kategori"
-                    value={selectedProduct.product?.category?.name || '-'}
+                    value={selectedProduct.product?.category?.name || selectedProduct.analysis.categoryName || '-'}
                   />
                   <Info
                     label="XML Kaynağı"
-                    value={selectedProduct.product?.xmlSource?.name || '-'}
+                    value={selectedProduct.product?.xmlSource?.name || selectedProduct.analysis.xmlSourceName || '-'}
                   />
                   <Info
                     label="Parent SKU"
@@ -659,26 +681,28 @@ export default function VariantMatchTab() {
               <Section title="📡 XML Analiz Sonuçları">
                 <div className="space-y-1.5 text-xs">
                   <CheckRow
-                    label="XML Parent SKU"
-                    checked={selectedProduct.analysis.xmlHasParent}
+                    label="Renk Attribute"
+                    checked={selectedProduct.analysis.hasColor || false}
                   />
-                  {Object.entries(selectedProduct.analysis.checks)
-                    .filter(([key]) =>
-                      ['hasParentSku', 'hasColor', 'hasSize', 'hasNumber', 'hasVariationTheme', 'hasMultipleVariants'].includes(key)
-                    )
-                    .map(([key, val]) => (
-                      <CheckRow key={key} label={checkLabelMap[key] || key} checked={val} />
-                    ))}
+                  <CheckRow
+                    label="Beden Attribute"
+                    checked={selectedProduct.analysis.hasSize || false}
+                  />
+                  <CheckRow
+                    label="Numara Attribute"
+                    checked={selectedProduct.analysis.hasNumber || false}
+                  />
                 </div>
               </Section>
 
               {/* DG Analizi */}
               <Section title="🤖 DG Analizi">
-                {/* Kaynak ve Güven */}
                 <div className="flex items-center justify-between text-xs mb-3">
                   <span className="text-slate-400">Kaynak:</span>
                   <span className="text-white font-medium">
-                    {getSourceLabel(selectedProduct.analysis.source)}
+                    {selectedProduct.analysis.source
+                      ? getSourceLabel(selectedProduct.analysis.source)
+                      : selectedProduct.analysis.status}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs mb-3">
@@ -706,50 +730,58 @@ export default function VariantMatchTab() {
                   />
                 </div>
 
-                {/* Checks */}
-                {Object.entries(selectedProduct.analysis.checks)
-                  .filter(
-                    ([key]) =>
-                      !['hasParentSku', 'hasColor', 'hasSize', 'hasNumber', 'hasVariationTheme', 'hasMultipleVariants'].includes(key)
-                  )
-                  .map(([key, val]) => (
-                    <CheckRow key={key} label={checkLabelMap[key] || key} checked={val} />
-                  ))}
-
-                {/* Errors */}
-                {selectedProduct.analysis.errors.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-[10px] uppercase tracking-wider text-red-400 mb-1.5 font-semibold">
-                      ❌ Hatalar ({selectedProduct.analysis.errors.length})
-                    </div>
-                    <div className="space-y-1">
-                      {selectedProduct.analysis.errors.map((err, i) => (
-                        <div
-                          key={i}
-                          className="text-[11px] text-red-300 bg-red-500/10 rounded px-2 py-1"
-                        >
-                          {err}
+                {/* Errors from checkResults */}
+                {(() => {
+                  const errs = safeArr(selectedProduct.analysis.errors);
+                  if (errs.length > 0) {
+                    return (
+                      <div className="mt-3">
+                        <div className="text-[10px] uppercase tracking-wider text-red-400 mb-1.5 font-semibold">
+                          ❌ Hatalar ({errs.length})
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Warnings */}
-                {selectedProduct.analysis.warnings.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-[10px] uppercase tracking-wider text-yellow-400 mb-1.5 font-semibold">
-                      ⚠️ Uyarılar ({selectedProduct.analysis.warnings.length})
-                    </div>
-                    <div className="space-y-1">
-                      {selectedProduct.analysis.warnings.map((warn, i) => (
-                        <div
-                          key={i}
-                          className="text-[11px] text-yellow-300 bg-yellow-500/10 rounded px-2 py-1"
-                        >
-                          {warn}
+                        <div className="space-y-1">
+                          {errs.map((err, i) => (
+                            <div key={i} className="text-[11px] text-red-300 bg-red-500/10 rounded px-2 py-1">
+                              {String(err)}
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Warnings from checkResults */}
+                {(() => {
+                  const warns = safeArr(selectedProduct.analysis.warnings);
+                  if (warns.length > 0) {
+                    return (
+                      <div className="mt-3">
+                        <div className="text-[10px] uppercase tracking-wider text-yellow-400 mb-1.5 font-semibold">
+                          ⚠️ Uyarılar ({warns.length})
+                        </div>
+                        <div className="space-y-1">
+                          {warns.map((warn, i) => (
+                            <div key={i} className="text-[11px] text-yellow-300 bg-yellow-500/10 rounded px-2 py-1">
+                              {String(warn)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* Önerilen İşlem */}
+                {selectedProduct.analysis.suggestedAction && (
+                  <div className="mt-3 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <div className="text-[10px] text-blue-400 uppercase tracking-wider font-semibold mb-0.5">
+                      💡 Önerilen İşlem
+                    </div>
+                    <div className="text-xs text-blue-300">
+                      {selectedProduct.analysis.suggestedAction}
                     </div>
                   </div>
                 )}
@@ -765,7 +797,7 @@ export default function VariantMatchTab() {
                       </code>
                       <span className="text-[10px] text-slate-500">
                         {selectedProduct.analysis.xmlHasParent
-                          ? '(XML\'den alındı)'
+                          ? "(XML'den alındı)"
                           : '(DG tarafından oluşturuldu)'}
                       </span>
                     </div>
@@ -786,7 +818,7 @@ export default function VariantMatchTab() {
                     {getStatusBadge(selectedProduct.analysis.status).label}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    {selectedProduct.analysis.reason || 'Ek sebep yok'}
+                    {selectedProduct.analysis.reason || selectedProduct.analysis.suggestedAction || 'Ek sebep yok'}
                   </span>
                 </div>
               </Section>
@@ -949,20 +981,3 @@ function CheckRow({
     </div>
   );
 }
-
-// ==================== SABİTLER ====================
-
-const checkLabelMap: Record<string, string> = {
-  hasParentSku: 'Parent SKU',
-  hasColor: 'Renk Attribute',
-  hasSize: 'Beden Attribute',
-  hasNumber: 'Numara Attribute',
-  hasVariationTheme: 'Variation Theme',
-  hasMultipleVariants: 'Çoklu Varyant',
-  duplicateBarcode: 'Barkod Benzersiz',
-  duplicateSku: 'SKU Benzersiz',
-  duplicateCombo: 'Renk+No Tekrarı',
-  missingColor: 'Renk Var',
-  missingSize: 'Beden Var',
-  missingNumber: 'Numara Var',
-};
