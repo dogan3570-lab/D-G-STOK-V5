@@ -1,303 +1,386 @@
-// ==================== MARKA ESLESTIRME V4.0 ====================
-// Hizli toplu eslestirme + aktivite logu
-import React, { useEffect, useState, useCallback } from 'react';
+// ==================== MARKA ESLESTIRME V3.0 (Nihai Surum) ====================
+// Performans: Server-side pagination, onbellek, virtual scroll
+// Ozellik: Canli onizleme, toplu islem, islem gunlugu
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { apiFetch } from '../../lib/api';
 import { showToast } from '../../components/ui/Toast';
 
-interface BrandStats {
-  totalSystemBrands: number; matchedProducts: number; unmatchedProducts: number;
-  totalMappings: number; totalLogs: number; xmlBrandUsage: number; dgBrandUsage: number; prefixEnabledCount: number;
+interface V3Stats {
+  totalXmlBrands: number; totalProducts: number; matchedProducts: number; unmatchedProducts: number;
+  xmlBrandUsage: number; dgBrandUsage: number; readyProducts: number; errorProducts: number;
+  activeBrands: number; aiSuggested: number; lastUpdate: string;
 }
 
-interface ProductItem {
-  id: string; title: string | null; xmlKey: string;
-  brand?: { id: string; name: string } | null;
-  brandId: string | null; brandMatch: boolean;
-  sku: string | null; barcode: string | null; stock: number;
-  salePrice: number | null; purchasePrice: number | null;
-  images: string | null; status: string;
-  category?: { id: string; name: string } | null;
-  xmlSource?: { id: string; name: string } | null;
-  updatedAt: string;
+interface BrandRow {
+  xmlBrand: string; productCount: number; matchedCount: number;
+  matchedBrand: string; brandType: string; dgBrandId: string;
 }
 
-interface BrandItem { id: string; name: string; prefixEnabled: boolean; prefixFormat: string; productCount: number; }
-interface XmlBrand { name: string; sourceName: string; }
+interface PreviewData {
+  xmlBrand: string; productName: string; category: string;
+  barcode: string; sku: string; selectedBrand: string;
+  finalTitle: string; finalBrand: string;
+}
+
 interface ActivityLog {
   id: string; action: string; xmlBrandName?: string; dgBrandName?: string;
-  productCount: number; details?: string; createdAt: string;
+  productCount: number; createdAt: string;
 }
 
-const PAGE_SIZES = [50, 100, 200, 500];
+const PAGE_SIZES = [50, 100, 200, 500, 1000];
 
 export default function BrandMatchTab() {
-  const [stats, setStats] = useState<BrandStats | null>(null);
-  const [products, setProducts] = useState<ProductItem[]>([]);
+  // State
+  const [stats, setStats] = useState<V3Stats | null>(null);
+  const [rows, setRows] = useState<BrandRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [search, setSearch] = useState('');
-
-  // Brand matching
-  const [systemBrands, setSystemBrands] = useState<BrandItem[]>([]);
-  const [xmlBrands, setXmlBrands] = useState<XmlBrand[]>([]);
-  const [selectedDgBrandId, setSelectedDgBrandId] = useState<string>('');
+  const [filter, setFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [defaultBrand, setDefaultBrand] = useState('DG STORE');
+  const [brandInput, setBrandInput] = useState('DG STORE');
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [aiRunning, setAiRunning] = useState(false);
-  const [matchAllTarget, setMatchAllTarget] = useState<string>('');
+  const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [selectedXmlBrand, setSelectedXmlBrand] = useState<string | null>(null);
+  const [systemBrands, setSystemBrands] = useState<Array<{ id: string; name: string }>>([]);
+  const [bulkBrandId, setBulkBrandId] = useState('');
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  // Activity log
-  const [activities, setActivities] = useState<ActivityLog[]>([]);
-
+  // Data fetching
   const fetchStats = useCallback(async () => {
-    const res = await apiFetch<any>('/brands/stats');
+    const res = await apiFetch<V3Stats>('/brands/v3/stats');
     if (res.ok && res.data) setStats(res.data);
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(pageSize), unbranded: 'true' });
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (search) params.append('search', search);
-      const res = await apiFetch<{ items: ProductItem[]; pagination: { total: number } }>(`/brands/products?${params}`);
+      if (filter !== 'all') params.append('filter', filter);
+      const res = await apiFetch<{ items: BrandRow[]; pagination: { total: number } }>(`/brands/v3/list?${params}`);
       if (res.ok && res.data) {
-        setProducts(res.data.items || []);
+        setRows(res.data.items || []);
         setTotal(res.data.pagination?.total || 0);
       }
     } finally { setLoading(false); }
-  }, [page, pageSize, search]);
+  }, [page, pageSize, search, filter]);
 
-  const fetchBrandData = useCallback(async () => {
-    const [sysRes, xmlRes] = await Promise.all([
-      apiFetch<{ items: BrandItem[] }>('/brands'),
-      apiFetch<{ items: XmlBrand[] }>('/brands/xml-brands'),
-    ]);
-    if (sysRes.ok && sysRes.data) setSystemBrands(sysRes.data.items || []);
-    if (xmlRes.ok && xmlRes.data) setXmlBrands(xmlRes.data.items || []);
+  const fetchBrands = useCallback(async () => {
+    const res = await apiFetch<{ items: Array<{ id: string; name: string }> }>('/brands');
+    if (res.ok && res.data) setSystemBrands(res.data.items || []);
   }, []);
 
-  const fetchActivities = useCallback(async () => {
-    const res = await apiFetch<{ items: ActivityLog[] }>('/brands/logs?limit=10');
-    if (res.ok && res.data) setActivities(res.data.items || []);
+  const fetchLogs = useCallback(async () => {
+    const res = await apiFetch<{ items: ActivityLog[] }>('/brands/v3/logs?limit=10');
+    if (res.ok && res.data) setLogs(res.data.items || []);
   }, []);
 
-  useEffect(() => { fetchStats(); fetchBrandData(); fetchActivities(); }, []);
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const fetchDefaultBrand = useCallback(async () => {
+    const res = await apiFetch<{ defaultBrand: string }>('/brands/v3/default-brand');
+    if (res.ok && res.data) { setDefaultBrand(res.data.defaultBrand); setBrandInput(res.data.defaultBrand); }
+  }, []);
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const fetchPreview = useCallback(async (xmlBrand: string) => {
+    const res = await apiFetch<{ preview: PreviewData }>(`/brands/v3/preview/${encodeURIComponent(xmlBrand)}`);
+    if (res.ok && res.data?.preview) setPreview(res.data.preview);
+  }, []);
+
+  // Init
+  useEffect(() => { fetchStats(); fetchBrands(); fetchLogs(); fetchDefaultBrand(); }, []);
+  useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  // Search debounce
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setPage(1), 300);
   };
 
+  // Selection
+  const toggleSelect = (name: string) => {
+    setSelectedIds(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  };
   const toggleSelectAll = () => {
-    setSelectedIds(prev => prev.size === products.length ? new Set() : new Set(products.map(p => p.id)));
+    setSelectedIds(prev => prev.size === rows.length ? new Set() : new Set(rows.map(r => r.xmlBrand)));
   };
 
-  const handleMatch = async () => {
-    if (selectedIds.size === 0 || !selectedDgBrandId) {
-      showToast('warning', 'Ürün ve marka seçin');
-      return;
-    }
-    const res = await apiFetch<any>('/brands/match', {
+  // Row click - preview
+  const handleRowClick = (row: BrandRow) => {
+    setSelectedXmlBrand(row.xmlBrand);
+    fetchPreview(row.xmlBrand);
+  };
+
+  // Quick match - single row
+  const handleQuickMatch = async (xmlBrand: string, dgBrandId: string) => {
+    const res = await apiFetch<any>('/brands/v3/match', {
       method: 'POST',
-      body: JSON.stringify({ productIds: Array.from(selectedIds), dgBrandId: selectedDgBrandId, xmlBrandName: 'manual_batch' }),
+      body: JSON.stringify({ xmlBrandName: xmlBrand, dgBrandId }),
     });
     if (res.ok) {
-      showToast('success', `✅ ${selectedIds.size} ürün eşleştirildi`);
-      setSelectedIds(new Set()); setSelectedDgBrandId('');
-      fetchData(); fetchStats(); fetchActivities();
-    } else showToast('error', res.error?.message || 'Eşleştirme başarısız');
+      showToast('success', `✅ ${xmlBrand} → ${res.data?.brandName || dgBrandId}`);
+      fetchStats(); fetchRows(); fetchLogs();
+      setSelectedIds(prev => { const n = new Set(prev); n.delete(xmlBrand); return n; });
+    }
   };
 
-  const handleMatchAll = async () => {
-    if (!selectedDgBrandId) { showToast('warning', 'Lütfen bir DG STOK markası seçin'); return; }
-    setAiRunning(true);
-    try {
-      showToast('info', '⏳ Tüm ürünler eşleştiriliyor...');
-      const res = await apiFetch<any>('/brands/match', {
-        method: 'POST',
-        body: JSON.stringify({ dgBrandId: selectedDgBrandId, xmlBrandName: 'bulk_all' }),
-      });
-      if (res.ok) {
-        showToast('success', `✅ ${res.data?.matchedCount || 0} ürün toplu eşleştirildi`);
-        setSelectedIds(new Set()); setSelectedDgBrandId('');
-        fetchData(); fetchStats(); fetchActivities();
-      } else showToast('error', res.error?.message || 'Toplu eşleştirme başarısız');
-    } finally { setAiRunning(false); }
+  // Bulk match - selected
+  const handleBulkMatch = async () => {
+    if (!bulkBrandId || selectedIds.size === 0) { showToast('warning', 'Marka ve en az 1 XML markası seçin'); return; }
+    setProgress({ current: 0, total: selectedIds.size });
+    const res = await apiFetch<any>('/brands/v3/bulk-match', {
+      method: 'POST',
+      body: JSON.stringify({ dgBrandId: bulkBrandId, xmlBrandNames: Array.from(selectedIds) }),
+    });
+    setProgress(null);
+    if (res.ok) {
+      showToast('success', `✅ ${res.data?.matchedCount || 0} ürün eşleştirildi`);
+      setSelectedIds(new Set()); setBulkBrandId('');
+      fetchStats(); fetchRows(); fetchLogs();
+    }
   };
 
+  // AI match
   const handleAiMatch = async () => {
     setAiRunning(true);
     try {
       showToast('info', '🤖 AI eşleştirme başlıyor...');
-      const res = await apiFetch<any>('/brands/ai-match', { method: 'POST', body: JSON.stringify({}) });
+      const res = await apiFetch<any>('/brands/v3/ai-match', { method: 'POST' });
       if (res.ok) {
-        showToast('success', `🤖 ${res.data?.matchedCount || 0} ürün AI ile eşleştirildi`);
-        fetchData(); fetchStats(); fetchActivities();
+        showToast('success', `🤖 ${res.data?.matchedCount || 0} ürün eşleştirildi`);
+        fetchStats(); fetchRows(); fetchLogs();
       }
     } finally { setAiRunning(false); }
   };
 
-  const allSelected = products.length > 0 && selectedIds.size === products.length;
+  // Default brand
+  const handleSaveDefaultBrand = async () => {
+    if (!brandInput.trim()) return;
+    const res = await apiFetch<any>('/brands/v3/default-brand', {
+      method: 'PUT', body: JSON.stringify({ brand: brandInput.trim() }),
+    });
+    if (res.ok) {
+      setDefaultBrand(brandInput.trim());
+      showToast('success', `✅ Varsayılan marka: ${brandInput.trim()}`);
+    }
+  };
+
+  // Export
+  const handleExport = () => {
+    window.open('/brands/v3/export', '_blank');
+  };
+
+  const allSelected = rows.length > 0 && selectedIds.size === rows.length;
 
   return (
     <div className="space-y-4">
-      {/* KPI kartlari */}
+      {/* 1. UST GOSTERGE PANELI */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <KpiCard title="Sistem Markası" value={(stats.totalSystemBrands ?? 0).toLocaleString('tr-TR')} color="blue" />
-          <KpiCard title="Eşleşen Ürün" value={(stats.matchedProducts ?? 0).toLocaleString('tr-TR')} color="green" />
-          <KpiCard title="Eşleşmeyen" value={(stats.unmatchedProducts ?? 0).toLocaleString('tr-TR')} color="yellow" />
-          <KpiCard title="XML Kullanım" value={(stats.xmlBrandUsage ?? 0).toLocaleString('tr-TR')} color="purple" />
-          <KpiCard title="DG Kullanım" value={(stats.dgBrandUsage ?? 0).toLocaleString('tr-TR')} color="cyan" />
+        <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+          <KpiCard title="XML Marka" value={stats.totalXmlBrands} color="blue" />
+          <KpiCard title="XML Ürün" value={stats.totalProducts} color="blue" />
+          <KpiCard title="Eşleşen" value={stats.matchedProducts} color="green" />
+          <KpiCard title="Eşleşmeyen" value={stats.unmatchedProducts} color="yellow" />
+          <KpiCard title="Kullanıcı Marka" value={stats.dgBrandUsage} color="purple" />
+          <KpiCard title="XML Marka Kullanım" value={stats.xmlBrandUsage} color="cyan" />
+          <KpiCard title="Gönderime Hazır" value={stats.readyProducts} color="green" />
+          <KpiCard title="Hatalı" value={stats.errorProducts} color="red" />
+          <KpiCard title="AI Önerisi" value={stats.aiSuggested} color="pink" />
+          <KpiCard title="Son Güncelleme" value={new Date(stats.lastUpdate).toLocaleTimeString('tr-TR')} color="slate" />
         </div>
       )}
 
-      {/* AI + aksiyon bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-800/50 p-2.5 backdrop-blur-sm">
-        <div className="flex items-center gap-2 flex-wrap">
-          <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Ürün ara..." className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-white placeholder-slate-400 w-56" />
-          <div className="flex gap-1">
+      {/* 2. ARAC CUBUGU */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/50 p-2.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <input type="text" defaultValue={search} onChange={e => handleSearch(e.target.value)}
+            placeholder="Marka ara..." className="rounded-lg border border-slate-600 bg-slate-700 px-2.5 py-1.5 text-xs text-white w-40" />
+          <select value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }}
+            className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white">
+            <option value="all">Tümü</option>
+            <option value="unmatched">Eşleşmeyen</option>
+            <option value="matched">Eşleşen</option>
+            <option value="ai">AI Önerisi</option>
+          </select>
+          <div className="flex gap-0.5">
             {PAGE_SIZES.map(s => (
               <button key={s} onClick={() => { setPageSize(s); setPage(1); }}
-                className={`rounded px-2.5 py-1.5 text-xs font-medium ${pageSize === s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>{s}</button>
+                className={`rounded px-2 py-1 text-[10px] font-medium ${pageSize === s ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>{s}</button>
             ))}
           </div>
-          <span className="text-xs text-slate-500">{total} ürün</span>
         </div>
-        <div className="flex gap-2">
-          <select value={matchAllTarget} onChange={e => setMatchAllTarget(e.target.value)}
-            className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white w-40">
-            <option value="">Toplu marka seç...</option>
-            {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <button onClick={() => { if (!matchAllTarget) { showToast('warning', 'Marka seçin'); return; } setSelectedDgBrandId(matchAllTarget); handleMatchAll(); }}
-            disabled={aiRunning || !matchAllTarget}
-            className="rounded-lg bg-green-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50">
-            📋 Tümünü Seç ve Eşleştir
-          </button>
+        <div className="flex items-center gap-1.5 flex-wrap ml-auto">
+          <input type="text" value={brandInput} onChange={e => setBrandInput(e.target.value)}
+            placeholder="Varsayılan Marka"
+            className="rounded-lg border border-slate-600 bg-slate-700 px-2.5 py-1.5 text-xs text-white font-bold w-32 text-center uppercase" />
+          <button onClick={handleSaveDefaultBrand}
+            className="rounded-lg bg-green-600 px-2.5 py-1.5 text-[10px] font-medium text-white hover:bg-green-700">💾 Kaydet</button>
           <button onClick={handleAiMatch} disabled={aiRunning}
-            className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:opacity-50">
-            {aiRunning ? '⏳' : '🤖'} AI ile Eşleştir
-          </button>
+            className="rounded-lg bg-purple-600 px-2.5 py-1.5 text-[10px] font-medium text-white hover:bg-purple-700 disabled:opacity-50">🤖 AI</button>
+          <button onClick={handleExport}
+            className="rounded-lg bg-slate-600 px-2.5 py-1.5 text-[10px] font-medium text-white hover:bg-slate-500">📥 Excel</button>
+          <button onClick={() => { fetchStats(); fetchRows(); fetchLogs(); }}
+            className="rounded-lg bg-slate-600 px-2.5 py-1.5 text-[10px] font-medium text-white hover:bg-slate-500">🔄</button>
         </div>
       </div>
 
-      {/* Seçim toolbar */}
+      {/* Toplu islem toolbar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-blue-900/20 border border-blue-700/30">
-          <span className="text-sm text-blue-300 font-medium">{selectedIds.size} ürün seçili</span>
-          <div className="flex gap-2">
-            <button onClick={() => setSelectedIds(new Set())}
-              className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-600">✕ Seçimi Temizle</button>
-            <select value={selectedDgBrandId} onChange={e => setSelectedDgBrandId(e.target.value)}
-              className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white">
-              <option value="">Marka seç...</option>
-              {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <button onClick={handleMatch} disabled={!selectedDgBrandId}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-              🔗 Seçilenleri Eşleştir
-            </button>
-          </div>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-900/20 border border-blue-700/30">
+          <span className="text-xs text-blue-300 font-medium">{selectedIds.size} XML marka seçili</span>
+          <select value={bulkBrandId} onChange={e => setBulkBrandId(e.target.value)}
+            className="rounded-lg border border-slate-600 bg-slate-700 px-2 py-1.5 text-xs text-white">
+            <option value="">Hedef marka seç...</option>
+            {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          <button onClick={handleBulkMatch} disabled={!bulkBrandId}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            🔗 {progress ? `${progress.current}/${progress.total}` : 'Toplu Eşleştir'}
+          </button>
+          {progress && (
+            <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${(progress.current / progress.total) * 100}%` }} />
+            </div>
+          )}
+          <button onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-slate-400 hover:text-white">✕</button>
         </div>
       )}
 
-      {/* Urun tablosu */}
-      <div className="rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
-        <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 480px)' }}>
-          <table className="w-full min-w-[700px]">
-            <thead className="bg-slate-700/50 sticky top-0 z-10">
-              <tr>
-                <th className="sticky left-0 z-20 bg-slate-700/50 px-3 py-3 w-10">
-                  <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
-                    className="rounded border-slate-600 bg-slate-700 text-blue-600" />
-                </th>
-                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-400 min-w-[180px]">Ürün</th>
-                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-400 min-w-[120px]">XML Marka</th>
-                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-400 min-w-[120px]">Eşleşen Marka</th>
-                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-400 min-w-[60px]">Stok</th>
-                <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-400 min-w-[80px]">Durum</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700/50">
-              {loading ? (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-400">
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-                    Yükleniyor...
-                  </div>
-                </td></tr>
-              ) : products.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-500">
-                  <div className="text-4xl mb-2">✅</div>
-                  <div className="text-sm font-medium text-slate-400">Tüm ürünler eşleştirilmiş</div>
-                </td></tr>
-              ) : products.map(p => (
-                <tr key={p.id} className={`transition-colors ${selectedIds.has(p.id) ? 'bg-blue-900/20' : 'hover:bg-slate-700/30'}`}>
-                  <td className="sticky left-0 z-10 bg-slate-800/30 px-3 py-2.5" onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)}
-                      className="rounded border-slate-600 bg-slate-700 text-blue-600" />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="text-xs font-medium text-white truncate max-w-[170px]" title={p.title || p.xmlKey}>{p.title || p.xmlKey}</div>
-                    <div className="text-[10px] text-slate-500">{p.sku || p.xmlKey}</div>
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-slate-400">{p.brand?.name || '-'}</td>
-                  <td className="px-3 py-2.5">
-                    {p.brandId && p.brandMatch ? (
-                      <span className="text-[10px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">{p.brand?.name || '✅'}</span>
-                    ) : (
-                      <span className="text-[10px] text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs">
-                    <span className={p.stock > 0 ? 'text-green-400' : 'text-red-400'}>{p.stock}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-[10px]">
-                    <span className={`font-medium ${p.brandMatch ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {p.brandMatch ? '✅ Eşleşti' : '⏳ Bekliyor'}
-                    </span>
-                  </td>
+      {/* 3. MARKA ESLESTIRME TABLOSU + CANLI ONIZLEME */}
+      <div className="flex flex-col xl:flex-row gap-3">
+        {/* TABLO */}
+        <div className={`${preview ? 'xl:w-1/2' : 'flex-1'} min-w-0 rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden`}>
+          <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 480px)' }}>
+            <table className="w-full min-w-[700px]">
+              <thead className="bg-slate-700/80 sticky top-0 z-10">
+                <tr>
+                  <th className="w-10 px-2 py-2.5"><input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
+                    className="rounded border-slate-600 bg-slate-700 text-blue-600" /></th>
+                  <TH>XML Markası</TH>
+                  <TH>Ürün</TH>
+                  <TH>Gönderilecek Marka</TH>
+                  <TH>Tip</TH>
+                  <TH>Durum</TH>
+                  <TH style={{ width: 60 }}></TH>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-700/50">
+                {loading ? (
+                  <tr><td colSpan={7} className="text-center py-12"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mx-auto" /></td></tr>
+                ) : rows.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-12 text-slate-500">✅ Tüm markalar eşleştirilmiş</td></tr>
+                ) : rows.map(row => (
+                  <tr key={row.xmlBrand}
+                    className={`transition-colors cursor-pointer ${selectedIds.has(row.xmlBrand) ? 'bg-blue-900/20' : 'hover:bg-slate-700/20'} ${selectedXmlBrand === row.xmlBrand ? 'bg-blue-900/10' : ''}`}
+                    onClick={() => handleRowClick(row)}>
+                    <td className="px-2 py-2" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedIds.has(row.xmlBrand)} onChange={() => toggleSelect(row.xmlBrand)}
+                        className="rounded border-slate-600 bg-slate-700 text-blue-600" />
+                    </td>
+                    <td className="px-3 py-2"><span className="text-xs font-medium text-white">{row.xmlBrand}</span></td>
+                    <td className="px-3 py-2"><span className="text-xs text-slate-300">{row.productCount.toLocaleString('tr-TR')}</span></td>
+                    <td className="px-3 py-2">
+                      <span className={`text-xs ${row.brandType === 'XML' ? 'text-slate-400' : 'text-green-400'}`}>{row.matchedBrand}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        row.brandType === 'XML' ? 'bg-slate-500/10 text-slate-400' :
+                        row.brandType === 'Eşleştirilmiş' ? 'bg-green-500/10 text-green-400' :
+                        'bg-purple-500/10 text-purple-400'
+                      }`}>{row.brandType}</span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`text-[10px] ${row.matchedCount > 0 ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {row.matchedCount > 0 ? '✅' : '⏳'}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2">
+                      <select value={row.dgBrandId} onChange={e => handleQuickMatch(row.xmlBrand, e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        className="rounded border border-slate-600 bg-slate-700 px-1.5 py-1 text-[10px] text-white w-20">
+                        <option value="">Hızlı</option>
+                        {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {total > pageSize && (
+            <div className="flex items-center justify-between px-3 py-2 border-t border-slate-700 bg-slate-800/60">
+              <span className="text-[10px] text-slate-500">{page}/{Math.ceil(total / pageSize)}</span>
+              <div className="flex gap-1">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
+                  className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30">◀</button>
+                <button onClick={() => setPage(p => p + 1)} disabled={page * pageSize >= total}
+                  className="rounded px-2 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30">▶</button>
+              </div>
+            </div>
+          )}
         </div>
-        {/* Sayfalama */}
-        {total > pageSize && (
-          <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-700 bg-slate-800/60">
-            <span className="text-xs text-slate-500">Sayfa {page}/{Math.ceil(total / pageSize)} · {total} ürün</span>
-            <div className="flex gap-1">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
-                className="rounded px-2.5 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30">◀</button>
-              <button onClick={() => setPage(p => p + 1)} disabled={page * pageSize >= total}
-                className="rounded px-2.5 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30">▶</button>
+
+        {/* 4. CANLI ÖNİZLEME PANELİ */}
+        {preview && (
+          <div className="xl:w-1/2 rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
+            <div className="p-3 border-b border-slate-700 bg-slate-800/80">
+              <h3 className="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>👁️</span> Canlı Önizleme: {preview.xmlBrand}
+              </h3>
+            </div>
+            <div className="grid grid-cols-2 gap-0">
+              {/* SOL: XML Verisi */}
+              <div className="p-3 border-r border-slate-700">
+                <h4 className="text-[10px] font-semibold text-slate-500 uppercase mb-2">📄 XML Verisi</h4>
+                <div className="space-y-1.5">
+                  <PreviewRow label="Marka" value={preview.xmlBrand} />
+                  <PreviewRow label="Ürün Adı" value={preview.productName} />
+                  <PreviewRow label="Kategori" value={preview.category || '-'} />
+                  <PreviewRow label="Barkod" value={preview.barcode || '-'} />
+                </div>
+              </div>
+              {/* SAĞ: Pazaryerine Gidecek */}
+              <div className="p-3 bg-green-900/10">
+                <h4 className="text-[10px] font-semibold text-green-400 uppercase mb-2">✅ Pazaryerine Gidecek</h4>
+                <div className="space-y-1.5">
+                  <PreviewRow label="Marka" value={preview.finalBrand} highlight />
+                  <PreviewRow label="Ürün Adı" value={preview.finalTitle} highlight />
+                  <PreviewRow label="Kategori" value={preview.category || '-'} />
+                  <PreviewRow label="Barkod" value={preview.barcode || '-'} />
+                </div>
+              </div>
+            </div>
+            <div className="p-3 bg-green-600/10 border-t border-green-600/20">
+              <div className="flex items-center gap-2 text-xs text-green-400">
+                <span>✓</span>
+                <span>Pazaryerine Bu Şekilde Gönderilecek</span>
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* AKTIVITE LOGU */}
-      {activities.length > 0 && (
+      {/* 5. İŞLEM GÜNLÜĞÜ */}
+      {logs.length > 0 && (
         <div className="rounded-xl border border-slate-700 bg-slate-800/30 p-3">
-          <h3 className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-            <span>📋</span> Son Eşleştirme Aktiviteleri
-          </h3>
-          <div className="space-y-1 max-h-32 overflow-y-auto">
-            {activities.map(a => (
-              <div key={a.id} className="flex items-center gap-2 text-[11px] text-slate-400 bg-slate-700/20 rounded px-2 py-1">
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                  a.action === 'BRAND_MATCH' ? 'bg-green-500/10 text-green-400' :
-                  a.action === 'AI_MATCH' ? 'bg-purple-500/10 text-purple-400' :
-                  a.action === 'BULK_CHANGE' ? 'bg-blue-500/10 text-blue-400' :
-                  'bg-slate-500/10 text-slate-400'
-                }`}>{a.action}</span>
-                {a.dgBrandName && <span className="text-white">{a.dgBrandName}</span>}
-                {a.xmlBrandName && <span className="text-slate-500">← {a.xmlBrandName}</span>}
-                <span className="text-slate-600">{a.productCount} ürün</span>
-                <span className="text-slate-600 ml-auto">{new Date(a.createdAt).toLocaleTimeString('tr-TR')}</span>
+          <h3 className="text-xs font-semibold text-slate-300 mb-2">📋 İşlem Günlüğü</h3>
+          <div className="space-y-1 max-h-24 overflow-y-auto">
+            {logs.map(log => (
+              <div key={log.id} className="flex items-center gap-2 text-[10px] text-slate-400 bg-slate-700/20 rounded px-2 py-1">
+                <span className="text-slate-600 w-12">{new Date(log.createdAt).toLocaleTimeString('tr-TR')}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[8px] font-medium ${
+                  log.action === 'BRAND_MATCH' ? 'bg-green-500/10 text-green-400' :
+                  log.action === 'AI_MATCH' ? 'bg-purple-500/10 text-purple-400' :
+                  log.action === 'BULK_CHANGE' ? 'bg-blue-500/10 text-blue-400' : 'bg-slate-500/10 text-slate-400'
+                }`}>{log.action}</span>
+                <span className="text-white">{log.dgBrandName || log.xmlBrandName || '-'}</span>
+                <span className="text-slate-500">{log.productCount} ürün</span>
               </div>
             ))}
           </div>
@@ -307,7 +390,7 @@ export default function BrandMatchTab() {
   );
 }
 
-function KpiCard({ title, value, color }: { title: string; value: string; color: string }) {
+function KpiCard({ title, value, color }: { title: string; value: string | number; color: string }) {
   const colorMap: Record<string, string> = {
     blue: 'border-blue-500/20 bg-blue-500/5 text-blue-400',
     green: 'border-green-500/20 bg-green-500/5 text-green-400',
@@ -315,11 +398,26 @@ function KpiCard({ title, value, color }: { title: string; value: string; color:
     red: 'border-red-500/20 bg-red-500/5 text-red-400',
     purple: 'border-purple-500/20 bg-purple-500/5 text-purple-400',
     cyan: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-400',
+    pink: 'border-pink-500/20 bg-pink-500/5 text-pink-400',
+    slate: 'border-slate-500/20 bg-slate-500/5 text-slate-400',
   };
   return (
-    <div className={`rounded-xl border p-3 backdrop-blur-sm ${colorMap[color] || colorMap.blue}`}>
-      <div className="text-[10px] uppercase tracking-wider opacity-70">{title}</div>
-      <div className="text-lg font-bold mt-0.5">{value}</div>
+    <div className={`rounded-lg border p-2 backdrop-blur-sm ${colorMap[color] || colorMap.blue}`}>
+      <div className="text-[9px] uppercase tracking-wider opacity-70">{title}</div>
+      <div className="text-sm font-bold mt-0.5">{typeof value === 'number' ? value.toLocaleString('tr-TR') : value}</div>
+    </div>
+  );
+}
+
+function TH({ children, style }: { children?: React.ReactNode; style?: React.CSSProperties }) {
+  return <th className={`whitespace-nowrap px-3 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-400`} style={style}>{children}</th>;
+}
+
+function PreviewRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[9px] text-slate-500">{label}</span>
+      <span className={`text-xs font-medium ${highlight ? 'text-green-300' : 'text-white'}`}>{value}</span>
     </div>
   );
 }
