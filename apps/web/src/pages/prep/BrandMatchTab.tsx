@@ -26,19 +26,24 @@ export default function BrandMatchTab() {
   const [aiRunning, setAiRunning] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  const fetchStats = useCallback(async () => { try { const r = await apiFetch<V3Stats>('/brands/v3/stats'); if (r.ok && r.data) setStats(r.data); } catch {} }, []);
+  const fetchStats = useCallback(async () => {
+    try {
+      const r = await apiFetch<any>('/brands/v3/stats');
+      if (r.ok && r.data?.stats) setStats(r.data.stats);
+    } catch {}
+  }, []);
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
       const p = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (search) p.append('search', search);
-      const r = await apiFetch<{ items: BrandRow[]; pagination: { total: number } }>(`/brands/v3/list?${p}`);
+      const r = await apiFetch<any>(`/brands/v3/list?${p}`);
       if (r.ok && r.data) { setRows(r.data.items || []); setTotal(r.data.pagination?.total || 0); }
     } finally { setLoading(false); }
   }, [page, pageSize, search]);
-  const fetchBrands = useCallback(async () => { try { const r = await apiFetch<{ items: Array<{ id: string; name: string }> }>('/brands'); if (r.ok && r.data) setSystemBrands(r.data.items || []); } catch {} }, []);
-  const fetchDefaultBrand = useCallback(async () => { try { const r = await apiFetch<{ defaultBrand: string }>('/brands/v3/default-brand'); if (r.ok && r.data) { setBrandInput(r.data.defaultBrand); } } catch {} }, []);
-  const fetchPreview = useCallback(async (name: string) => { try { const r = await apiFetch<{ preview: PreviewData }>(`/brands/v3/preview/${encodeURIComponent(name)}`); if (r.ok && r.data?.preview) setPreview(r.data.preview); } catch {} }, []);
+  const fetchBrands = useCallback(async () => { try { const r = await apiFetch<any>('/brands'); if (r.ok && r.data) setSystemBrands(r.data.items || []); } catch {} }, []);
+  const fetchDefaultBrand = useCallback(async () => { try { const r = await apiFetch<any>('/brands/v3/default-brand'); if (r.ok && r.data) { setBrandInput(r.data.defaultBrand); } } catch {} }, []);
+  const fetchPreview = useCallback(async (name: string) => { try { const r = await apiFetch<any>(`/brands/v3/preview/${encodeURIComponent(name)}`); if (r.ok && r.data?.preview) setPreview(r.data.preview); } catch {} }, []);
 
   useEffect(() => { fetchStats(); fetchBrands(); fetchDefaultBrand(); }, []);
   useEffect(() => { fetchRows(); }, [fetchRows]);
