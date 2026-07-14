@@ -17,6 +17,8 @@ interface ProductItem {
   categoryMatch: boolean; brandMatch: boolean; variantMatch: boolean; templateMatch: boolean;
   categoryId: string | null; brandId: string | null; xmlSourceId: string | null;
   supplierCategory: string | null;
+  prefixEnabled?: boolean;  // Drawer detay için
+  computedTitle?: string | null; // Drawer detay için
   category?: { id: string; name: string } | null;
   brand?: { id: string; name: string } | null;
   xmlSource?: { id: string; name: string; company?: string | null } | null;
@@ -29,6 +31,7 @@ interface Pagination { page: number; limit: number; total: number; totalPages: n
 interface PoolStats {
   totalProducts: number; readyForListing: number; newProducts: number;
   pendingCategory: number; pendingBrand: number; pendingVariant: number;
+  variantAnalysisPending: number; // Varyant Motoru V2 (manuel + hatalı)
   errorProducts: number;
 }
 
@@ -266,12 +269,13 @@ export default function ProductPool() {
     <div className="space-y-4">
       {/* ========== KPI KARTLARI ========== */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-3">
           <KpiCard title="Toplam Ürün" value={stats.totalProducts.toLocaleString('tr-TR')} color="blue" />
           <KpiCard title="Gönderime Hazır" value={stats.readyForListing.toLocaleString('tr-TR')} color="green" />
           <KpiCard title="Kategori Bekleyen" value={stats.pendingCategory.toLocaleString('tr-TR')} color="yellow" />
           <KpiCard title="Marka Bekleyen" value={stats.pendingBrand.toLocaleString('tr-TR')} color="orange" />
           <KpiCard title="Varyant Bekleyen" value={stats.pendingVariant.toLocaleString('tr-TR')} color="purple" />
+          <KpiCard title="Varyant V2 ⚠️" value={stats.variantAnalysisPending?.toLocaleString('tr-TR') || '0'} color="pink" />
           <KpiCard title="Hatalı" value={stats.errorProducts.toLocaleString('tr-TR')} color="red" />
         </div>
       )}
@@ -455,6 +459,7 @@ function KpiCard({ title, value, color }: { title: string; value: string; color:
     yellow: 'border-yellow-500/20 bg-yellow-500/5 text-yellow-400',
     orange: 'border-orange-500/20 bg-orange-500/5 text-orange-400',
     purple: 'border-purple-500/20 bg-purple-500/5 text-purple-400',
+    pink: 'border-pink-500/20 bg-pink-500/5 text-pink-400',
     red: 'border-red-500/20 bg-red-500/5 text-red-400',
   };
   return (

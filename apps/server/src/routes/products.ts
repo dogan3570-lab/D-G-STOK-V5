@@ -8,6 +8,7 @@ const router = Router();
 // ==================== ÜRÜN İSTATİSTİK ====================
 
 // GET /products/stats - Ürün Havuzu KPI istatistikleri
+// NOT: Kategori/Marka/Varyant sayıları, Preparation sekmeleriyle tutarlı olmalıdır.
 router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
   try {
     const now = new Date();
@@ -23,9 +24,9 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       newToday,
       updatedToday,
       deletedToday,
-      pendingCategory,
-      pendingBrand,
-      pendingVariant,
+      pendingCategory,    // categoryId IS NULL → Kategori Hazırlama ile tutarlı
+      pendingBrand,       // brandMatch IS FALSE → Marka Hazırlama ile tutarlı
+      pendingVariant,     // variantMatch IS FALSE → Varyant Hazırlama V1 ile tutarlı
       missingImages,
       missingBarcode,
       missingDescription,
@@ -33,6 +34,7 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       missingStock,
       missingSeo,
       templatePending,
+      variantAnalysisPending, // V2 sistemi: manuel inceleme + hatalı
     ] = await Promise.all([
       prisma.product.count(),
       prisma.product.count({ where: { status: 'READY' } }),
@@ -43,9 +45,9 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       prisma.product.count({ where: { createdAt: { gte: todayStart } } }),
       prisma.product.count({ where: { updatedAt: { gte: todayStart } } }),
       0, // Silinen ürünler (şu an için audit log'dan alınabilir)
-      prisma.product.count({ where: { categoryMatch: false } }),
-      prisma.product.count({ where: { brandMatch: false } }),
-      prisma.product.count({ where: { variantMatch: false } }),
+      prisma.product.count({ where: { categoryId: null } }), // Kategori Hazırlama ile aynı sorgu
+      prisma.product.count({ where: { brandMatch: false } }), // Marka Hazırlama ile aynı sorgu
+      prisma.product.count({ where: { variantMatch: false } }), // Varyant V1 ile tutarlı
       prisma.product.count({ where: { images: null } }),
       prisma.product.count({ where: { barcode: null } }),
       prisma.product.count({ where: { description: null } }),
@@ -53,6 +55,10 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       prisma.product.count({ where: { stock: { lte: 0 } } }),
       prisma.product.count({ where: { seoTitle: null, seoDescription: null } }),
       prisma.product.count({ where: { templateMatch: false } }),
+      // Varyant Motoru V2'ye göre bekleyen ürünler (manuel inceleme + hatalı)
+      prisma.variantAnalysis.count({
+        where: { status: { in: ['NEEDS_REVIEW', 'MANUAL_REQUIRED', 'ERROR'] } },
+      }),
     ]);
 
     res.json({
@@ -65,10 +71,11 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       deletedCount: deletedToday,
       readyForListing: readyProducts,
       missingInfo: totalProducts - readyProducts,
-      pendingCategory,
-      pendingBrand,
-      pendingVariant,
+      pendingCategory,       // Kategori Hazırlama ile tutarlı (categoryId IS NULL)
+      pendingBrand,          // Marka Hazırlama ile tutarlı (brandMatch IS FALSE)
+      pendingVariant,        // Varyant V1 ile tutarlı (variantMatch IS FALSE)
       pendingTemplate: templatePending,
+      variantAnalysisPending, // Varyant Motoru V2 (manuel inceleme + hatalı)
       missingImages,
       missingBarcode,
       missingDescription,
