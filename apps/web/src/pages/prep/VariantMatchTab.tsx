@@ -111,8 +111,18 @@ export default function VariantMatchTab() {
 
   const fetchStats = useCallback(async () => {
     const params = selectedXmlId ? `?xmlSourceId=${selectedXmlId}` : '';
-    const res = await apiFetch<{ stats: V2Stats }>(`/variants/v2/stats${params}`);
-    if (res.ok && res.data) setStats(res.data.stats);
+    const res = await apiFetch<any>(`/variants/v4/stats${params}`);
+    if (res.ok && res.data?.stats) {
+      const s = res.data.stats;
+      setStats({
+        totalProducts: s.totalProducts || 0,
+        xmlVariant: s.xmlAccepted || 0,
+        autoCreated: s.autoCreated || 0,
+        autoSuggest: s.autoSuggest || 0,
+        manualReview: s.manualReview || 0,
+        errors: s.errors || 0,
+      });
+    }
   }, [selectedXmlId]);
 
   const fetchXmlSources = useCallback(async () => {
@@ -121,8 +131,8 @@ export default function VariantMatchTab() {
   }, []);
 
   const fetchThresholds = useCallback(async () => {
-    const res = await apiFetch<{ items: Record<string, number> }>('/variants/v2/thresholds');
-    if (res.ok && res.data) setThresholds(res.data.items);
+    const res = await apiFetch<any>('/variants/v4/thresholds');
+    if (res.ok && res.data?.items) setThresholds(res.data.items);
   }, []);
 
   // Sorunlu ürünleri getir
@@ -136,8 +146,8 @@ export default function VariantMatchTab() {
           limit: String(PAGE_SIZE),
         });
         if (selectedXmlId) params.append('xmlSourceId', selectedXmlId);
-        return apiFetch<{ items: VariantAnalysisItem[]; total: number }>(
-          `/variants/v2/problems?${params}`
+        return apiFetch<any>(
+          `/variants/v4/problems?${params}`
         );
       });
 
@@ -200,8 +210,8 @@ export default function VariantMatchTab() {
     setScanning(true);
     try {
       showToast('info', '🔍 Varyantlar taranıyor...');
-      const res = await apiFetch<{ stats: V2Stats }>(
-        `/variants/v2/scan/${selectedXmlId}`,
+      const res = await apiFetch<any>(
+        `/variants/v4/scan/${selectedXmlId}`,
         { method: 'POST' }
       );
       if (res.ok) {
