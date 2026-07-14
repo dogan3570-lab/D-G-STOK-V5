@@ -57,8 +57,10 @@ interface ProblemRow {
   product?: ProductDetail;
 }
 
-// Kullanıcının müdahale edebileceği hatalı ürünler (sadece ERROR)
-const PROBLEM_STATUSES = ['ERROR'] as const;
+// Kullanıcının müdahale edebileceği ürünler (MANUAL_REVIEW + ERROR)
+// MANUAL_REVIEW: manuel inceleme gereken ürünler
+// ERROR: kullanıcının düzeltmesi gereken hatalı ürünler
+const PROBLEM_STATUSES = ['MANUAL_REVIEW', 'ERROR'] as const;
 const PAGE_SIZE = 50;
 
 // ==================== COMPONENT ====================
