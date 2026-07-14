@@ -20,6 +20,7 @@ interface PreviewData {
   xmlBrand: string; productName: string; category: string;
   barcode: string; sku: string; selectedBrand: string;
   finalTitle: string; finalBrand: string;
+  formatDescription?: string;
 }
 
 interface ActivityLog {
@@ -328,12 +329,20 @@ export default function BrandMatchTab() {
                       </span>
                     </td>
                     <td className="px-2 py-2">
-                      <select value={row.dgBrandId} onChange={e => handleQuickMatch(row.xmlBrand, e.target.value)}
-                        onClick={e => e.stopPropagation()}
-                        className="rounded border border-slate-600 bg-slate-700 px-1.5 py-1 text-[10px] text-white w-20">
-                        <option value="">Hızlı</option>
-                        {systemBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
+                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                        <input type="text" placeholder="Marka® yaz..."
+                          className="w-16 rounded border border-slate-600 bg-slate-700 px-1 py-1 text-[9px] text-white"
+                          id={`custom_${row.xmlBrand}`} />
+                        <button onClick={() => {
+                          const input = document.getElementById(`custom_${row.xmlBrand}`) as HTMLInputElement;
+                          const val = input?.value?.trim();
+                          if (val) handleQuickMatch(row.xmlBrand, '', val);
+                          else showToast('warning', 'Marka adı yazın');
+                        }}
+                          className="rounded bg-green-600 px-1.5 py-1 text-[8px] text-white hover:bg-green-700">
+                          🔗 Uygula
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -360,6 +369,7 @@ export default function BrandMatchTab() {
               <h3 className="text-xs font-semibold text-white flex items-center gap-1.5">
                 <span>👁️</span> Canlı Önizleme: {preview.xmlBrand}
               </h3>
+              <div className="text-[9px] text-slate-500 mt-0.5">{preview.formatDescription}</div>
             </div>
             <div className="grid grid-cols-2 gap-0">
               {/* SOL: XML Verisi */}
@@ -375,9 +385,15 @@ export default function BrandMatchTab() {
               {/* SAĞ: Pazaryerine Gidecek */}
               <div className="p-3 bg-green-900/10">
                 <h4 className="text-[10px] font-semibold text-green-400 uppercase mb-2">✅ Pazaryerine Gidecek</h4>
-                <div className="space-y-1.5">
-                  <PreviewRow label="Marka" value={preview.finalBrand} highlight />
-                  <PreviewRow label="Ürün Adı" value={preview.finalTitle} highlight />
+                <div className="space-y-2">
+                  <div className="bg-green-800/20 rounded p-2 border border-green-700/30">
+                    <div className="text-[9px] text-green-400">Marka</div>
+                    <div className="text-xs font-bold text-green-300">{preview.finalBrand}<span className="text-green-500">®</span></div>
+                  </div>
+                  <div className="bg-green-800/20 rounded p-2 border border-green-700/30">
+                    <div className="text-[9px] text-green-400">Ürün Adı (Pazaryerinde)</div>
+                    <div className="text-xs font-bold text-green-300">{preview.finalTitle}</div>
+                  </div>
                   <PreviewRow label="Kategori" value={preview.category || '-'} />
                   <PreviewRow label="Barkod" value={preview.barcode || '-'} />
                 </div>

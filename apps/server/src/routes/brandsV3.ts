@@ -110,19 +110,23 @@ router.get('/preview/:xmlBrandName', requireAuth, async (req, res) => {
     if (!product) return res.json({ ok: true, preview: null });
 
     const setting = await prisma.setting.findUnique({ where: { key: 'default_brand' } });
-    const defaultBrand = setting?.value || 'DG STORE';
+    const selectedBrand = setting?.value || 'DG STORE';
+    const productName = product.title || product.xmlKey;
+    // Marka® Ürün Adı formatı
+    const finalTitle = `${selectedBrand}® ${productName}`;
 
     return res.json({
       ok: true,
       preview: {
         xmlBrand: product.brand?.name || '',
-        productName: product.title || product.xmlKey,
+        productName,
         category: product.category?.name || '',
         barcode: product.barcode || '',
         sku: product.sku || '',
-        selectedBrand: defaultBrand,
-        finalTitle: `${defaultBrand} ${product.title || product.xmlKey}`,
-        finalBrand: defaultBrand,
+        selectedBrand,
+        finalTitle,
+        finalBrand: selectedBrand,
+        formatDescription: 'Marka® Ürün Adı şeklinde pazaryerine gönderilecek',
       },
     });
   } catch (error) {
