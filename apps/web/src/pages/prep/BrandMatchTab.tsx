@@ -93,10 +93,10 @@ export default function BrandMatchTab() {
         <span className="text-[10px] text-slate-500 ml-auto">{total} kayıt</span>
       </div>
 
-      {/* Tablo + Onizleme yan yana */}
-      <div className="flex flex-col lg:flex-row gap-2">
+      {/* TABLO (UST) + ONIZLEME (ALT) */}
+      <div className="flex flex-col gap-2">
         {/* TABLO */}
-        <div className={`${selectedXmlBrand ? 'lg:w-3/5' : 'w-full'} rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden`}>
+        <div className="w-full rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden">
           <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 380px)' }}>
             <table className="w-full">
               <thead className="bg-slate-700/80 sticky top-0 z-10">
@@ -157,7 +157,7 @@ export default function BrandMatchTab() {
 
         {/* CANLI ÖNİZLEME */}
         {preview && (
-          <div className="lg:w-2/5 rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
+          <div className="w-full rounded-xl border border-slate-700 bg-slate-800/50 overflow-hidden">
             <div className="p-2 border-b border-slate-700 bg-slate-800/80">
               <h3 className="text-xs font-semibold text-white">👁️ Canlı Önizleme: {preview.xmlBrand}</h3>
             </div>
