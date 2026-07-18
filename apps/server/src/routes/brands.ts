@@ -2,6 +2,8 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
+import { EventBus } from '../services/eventBus/EventBus.ts';
+import { createCorrelationId } from '../services/eventBus/events.ts';
 
 const router = Router();
 
@@ -200,6 +202,29 @@ router.post('/match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (re
     const productCount = await prisma.product.count({ where: { brandId: dgBrandId } });
     await prisma.brandMapping.update({ where: { xmlBrandName }, data: { productCount } });
     await createBrandLog({ action: 'BRAND_MATCH', xmlBrandName, dgBrandId, dgBrandName: dgBrand.name, productCount: result.count, actorUserId: (req as AuthedRequest).actor?.userId, details: JSON.stringify({ hasProductFilter: Array.isArray(productIds) }) });
+
+    // EVENT: Marka eşleştirme değişikliğini yayınla
+    if (result.count > 0) {
+      const affectedProductIds = Array.isArray(productIds) && productIds.length > 0
+        ? productIds
+        : (await prisma.product.findMany({ where: { brandId: dgBrandId }, select: { id: true }, take: 10000 })).map(p => p.id);
+      const correlationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'BrandMatchChanged',
+        correlationId,
+        timestamp: new Date().toISOString(),
+        source: 'brands.match',
+        data: {
+          productIds: affectedProductIds,
+          productCount: affectedProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'manual',
+          triggeredBy: (req as AuthedRequest).actor?.userId,
+        },
+      });
+    }
+
     res.json({ matchedCount: result.count, message: `${result.count} \u00fcr\u00fcn "${dgBrand.name}" markas\u0131na e\u015fle\u015ftirildi` });
   } catch (error) { console.error('[brands] POST match error:', error); res.status(500).json({ error: { code: 'DB_ERROR', message: 'E\u015fle\u015ftirme ba\u015far\u0131s\u0131z' } }); }
 });
@@ -213,6 +238,29 @@ router.post('/unmatch', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (
     else return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'xmlBrandName veya productIds zorunludur' } });
     const result = await prisma.product.updateMany({ where, data: { brandId: null, brandMatch: false, brandUsageType: 'XML_BRAND' } });
     await createBrandLog({ action: 'BRAND_UNMATCH', xmlBrandName, productCount: result.count, actorUserId: (req as AuthedRequest).actor?.userId });
+
+    // EVENT: Marka eşleştirme kaldırma
+    if (result.count > 0) {
+      const affectedIds = Array.isArray(productIds) && productIds.length > 0
+        ? productIds
+        : (await prisma.product.findMany({ where, select: { id: true }, take: 10000 })).map(p => p.id);
+      const correlationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'BrandMatchChanged',
+        correlationId,
+        timestamp: new Date().toISOString(),
+        source: 'brands.unmatch',
+        data: {
+          productIds: affectedIds,
+          productCount: affectedIds.length,
+          oldValue: true,
+          newValue: false,
+          source: 'manual',
+          triggeredBy: (req as AuthedRequest).actor?.userId,
+        },
+      });
+    }
+
     res.json({ unmatchedCount: result.count, message: `${result.count} \u00fcr\u00fcn\u00fcn e\u015fle\u015ftirmesi kald\u0131r\u0131ld\u0131` });
   } catch (error) { res.status(500).json({ error: { code: 'DB_ERROR', message: 'E\u015fle\u015ftirme kald\u0131r\u0131lamad\u0131' } }); }
 });
@@ -221,7 +269,8 @@ router.post('/bulk-match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), asyn
   try {
     const { matches } = req.body;
     if (!Array.isArray(matches) || matches.length === 0) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'matches array required' } });
-    let totalMatched = 0; const results: Array<{ xmlBrandName: string; dgBrandName: string; count: number }> = [];
+    let totalMatched = 0; const allProductIds: string[] = [];
+    const results: Array<{ xmlBrandName: string; dgBrandName: string; count: number }> = [];
     for (const match of matches) {
       const { xmlBrandName, dgBrandId } = match;
       const dgBrand = await prisma.brand.findUnique({ where: { id: dgBrandId } });
@@ -231,8 +280,30 @@ router.post('/bulk-match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), asyn
       const productCount = await prisma.product.count({ where: { brandId: dgBrandId } });
       await prisma.brandMapping.update({ where: { xmlBrandName }, data: { productCount } });
       totalMatched += result.count; results.push({ xmlBrandName, dgBrandName: dgBrand.name, count: result.count });
+      const ids = (await prisma.product.findMany({ where: { brandId: dgBrandId }, select: { id: true }, take: 10000 })).map(p => p.id);
+      allProductIds.push(...ids);
     }
     await createBrandLog({ action: 'BULK_CHANGE', productCount: totalMatched, details: JSON.stringify(results), actorUserId: (req as AuthedRequest).actor?.userId });
+
+    // EVENT: Toplu marka eşleştirme
+    if (allProductIds.length > 0) {
+      const correlationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'BrandMatchChanged',
+        correlationId,
+        timestamp: new Date().toISOString(),
+        source: 'brands.bulkMatch',
+        data: {
+          productIds: allProductIds,
+          productCount: allProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'bulk',
+          triggeredBy: (req as AuthedRequest).actor?.userId,
+        },
+      });
+    }
+
     res.json({ matchedCount: totalMatched, results, message: `${totalMatched} \u00fcr\u00fcn toplu e\u015fle\u015ftirildi` });
   } catch (error) { console.error('[brands] POST bulk-match error:', error); res.status(500).json({ error: { code: 'DB_ERROR', message: 'Toplu e\u015fle\u015ftirme ba\u015far\u0131s\u0131z' } }); }
 });
@@ -278,6 +349,27 @@ router.post('/ai-match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async 
       }
     }
     await createBrandLog({ action: 'AI_MATCH', productCount: matchedCount, details: JSON.stringify({ autoMappingCount, totalScanned: products.length }), actorUserId: (req as AuthedRequest).actor?.userId });
+
+    // EVENT: AI marka eşleştirme
+    if (matchedCount > 0) {
+      const matchedProductIds = results.map(r => r.productId);
+      const aiCorrelationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'BrandMatchChanged',
+        correlationId: aiCorrelationId,
+        timestamp: new Date().toISOString(),
+        source: 'brands.aiMatch',
+        data: {
+          productIds: matchedProductIds,
+          productCount: matchedProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'ai',
+          triggeredBy: (req as AuthedRequest).actor?.userId,
+        },
+      });
+    }
+
     res.json({ matchedCount, totalProducts: products.length, autoMappingCount, message: `${matchedCount} \u00fcr\u00fcn AI ile e\u015fle\u015ftirildi (${autoMappingCount} otomatik mapping)`, results });
   } catch (error) { console.error('[brands] POST ai-match error:', error); res.status(500).json({ error: { code: 'DB_ERROR', message: 'AI e\u015fle\u015ftirme ba\u015far\u0131s\u0131z' } }); }
 });

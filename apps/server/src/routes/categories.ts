@@ -2,6 +2,8 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth } from '../auth/authMiddleware.ts';
+import { EventBus } from '../services/eventBus/EventBus.ts';
+import { createCorrelationId } from '../services/eventBus/events.ts';
 
 const router = Router();
 
@@ -287,6 +289,26 @@ router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
       },
     });
 
+    // EVENT: AI kategori eşleştirme
+    if (matchedCount > 0) {
+      const aiCorrelationId = createCorrelationId('WF');
+      const aiProductIds = toUpdateMatch.map(m => m.id);
+      await EventBus.emit({
+        type: 'CategoryMatchChanged',
+        correlationId: aiCorrelationId,
+        timestamp: new Date().toISOString(),
+        source: 'categories.aiMatch',
+        data: {
+          productIds: aiProductIds,
+          productCount: matchedCount,
+          oldValue: false,
+          newValue: true,
+          source: 'ai',
+          triggeredBy: (req as any).actor?.userId,
+        },
+      });
+    }
+
     res.json({
       matchedCount,
       suggestedCount,
@@ -307,18 +329,40 @@ router.post('/bulk-match', requireAuth, async (req: Request, res: Response) => {
     if (!Array.isArray(matches) || matches.length === 0) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'matches array is required' } });
 
     let totalMatched = 0;
+    const allProductIds: string[] = [];
     const results: Array<{ xmlCategory: string; systemCategory: string; count: number }> = [];
     for (const match of matches) {
       const { xmlCategoryPath, systemCategoryId } = match;
       const products = await prisma.product.findMany({ where: { supplierCategory: xmlCategoryPath }, select: { id: true } });
       if (products.length > 0 && systemCategoryId) {
         const productIds = products.map(p => p.id);
+        allProductIds.push(...productIds);
         await prisma.product.updateMany({ where: { id: { in: productIds } }, data: { categoryId: systemCategoryId, categoryMatch: true } });
         const systemCat = await prisma.category.findUnique({ where: { id: systemCategoryId } });
         totalMatched += products.length;
         results.push({ xmlCategory: xmlCategoryPath, systemCategory: systemCat?.name || 'Bilinmeyen', count: products.length });
       }
     }
+
+    // EVENT: Kategori eşleştirme değişikliğini yayınla
+    if (allProductIds.length > 0) {
+      const correlationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'CategoryMatchChanged',
+        correlationId,
+        timestamp: new Date().toISOString(),
+        source: 'categories.bulkMatch',
+        data: {
+          productIds: allProductIds,
+          productCount: allProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'bulk',
+          triggeredBy: (req as any).actor?.userId,
+        },
+      });
+    }
+
     await prisma.auditLog.create({ data: { action: 'BULK_CATEGORY_MATCH', entity: 'category', meta: JSON.stringify({ totalMatched, categoryCount: results.length }), details: `Toplu eşleştirme: ${totalMatched} ürün, ${results.length} kategori`, actorUserId: (req as any).actor?.userId || null } });
     res.json({ matchedCount: totalMatched, results, message: `${totalMatched} ürün toplu olarak eşleştirildi` });
   } catch (error) {
@@ -429,6 +473,26 @@ router.post('/match', requireAuth, async (req: Request, res: Response) => {
     const category = await prisma.category.findUnique({ where: { id: categoryId } });
     if (!category) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Kategori bulunamadı' } });
     const result = await prisma.product.updateMany({ where: { id: { in: productIds } }, data: { categoryId, categoryMatch: true, matchedBy: 'manual', lastMatchDate: new Date() } });
+
+    // EVENT: Kategori eşleştirme değişikliğini yayınla
+    if (result.count > 0) {
+      const correlationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'CategoryMatchChanged',
+        correlationId,
+        timestamp: new Date().toISOString(),
+        source: 'categories.match',
+        data: {
+          productIds,
+          productCount: result.count,
+          oldValue: false,
+          newValue: true,
+          source: 'manual',
+          triggeredBy: (req as any).actor?.userId,
+        },
+      });
+    }
+
     await prisma.auditLog.create({ data: { action: 'CATEGORY_MATCH', entity: 'category', entityId: categoryId, details: `${result.count} ürün "${category.name}" kategorisine eşleştirildi`, actorUserId: (req as any).actor?.userId || null } });
     res.json({ matchedCount: result.count, message: `${result.count} ürün eşleştirildi` });
   } catch (error) {
@@ -442,6 +506,26 @@ router.post('/unmatch', requireAuth, async (req: Request, res: Response) => {
     const { productIds } = req.body;
     if (!Array.isArray(productIds) || productIds.length === 0) return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'productIds array is required' } });
     const result = await prisma.product.updateMany({ where: { id: { in: productIds } }, data: { categoryId: null, categoryMatch: false } });
+
+    // EVENT: Kategori eşleştirme kaldırma
+    if (result.count > 0) {
+      const correlationId = createCorrelationId('WF');
+      await EventBus.emit({
+        type: 'CategoryMatchChanged',
+        correlationId,
+        timestamp: new Date().toISOString(),
+        source: 'categories.unmatch',
+        data: {
+          productIds,
+          productCount: result.count,
+          oldValue: true,
+          newValue: false,
+          source: 'manual',
+          triggeredBy: (req as any).actor?.userId,
+        },
+      });
+    }
+
     await prisma.auditLog.create({ data: { action: 'CATEGORY_UNMATCH', entity: 'category', details: `${result.count} ürünün kategori eşleştirmesi kaldırıldı`, actorUserId: (req as any).actor?.userId || null } });
     res.json({ unmatchedCount: result.count, message: `${result.count} ürünün eşleştirmesi kaldırıldı` });
   } catch (error) {

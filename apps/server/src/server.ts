@@ -17,7 +17,7 @@ import { attachSseEndpoint } from './sse/events.ts';
 import { setupWebSocketServer, broadcast, getClientCount, getActiveSubscriptions } from './sse/websocket.ts';
 import { attachRoutes } from './routes/index.ts';
 import { startWorkers } from './workers/index.ts';
-import { ensureDefaultAdminUser } from './bootstrap.ts';
+import { ensureDefaultAdminUser, initializeEventSystem } from './bootstrap.ts';
 import { ensureDatabaseReady } from './db/ensureDb.ts';
 import { startScheduler } from './services/automationScheduler.ts';
 
@@ -216,6 +216,9 @@ if (process.env.NODE_ENV !== 'test') {
     }
 
     try {
+      // Event sistemini başlat (önce)
+      initializeEventSystem();
+
       await ensureDatabaseReady();
       console.log('[server] database ready');
       await ensureDefaultAdminUser();

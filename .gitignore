@@ -11,3 +11,68 @@ coverage
 *.sqlite
 prisma/prisma/
 apps/web/dist/
+
+# Geçici dosyalar ve build çıktıları
+temp/
+tmp/
+*.tgz
+*.tar.gz
+*.zip
+cookie.txt
+cookie2.txt
+cookie3.txt
+login.txt
+$null
+
+# Test dosyaları
+test/
+tests/
+*.test.ts
+*.test.mjs
+*.spec.ts
+*.spec.mjs
+apps/server/tests/
+apps/server/vitest.config.ts
+apps/server/prisma/seed-*.mjs
+
+# Geçici scriptler
+apps/server/*.mjs
+apps/server/*.cjs
+apps/server/final-setup.ts
+apps/server/go-production.ts
+apps/server/revert-stage.ts
+apps/server/test-product-creation.ts
+apps/server/run-trendyol-tests.ts
+apps/server/seed-demo.mjs
+apps/server/setup-trendyol-production.ts
+apps/server/setup-trendyol-stage.ts
+
+# Raporlar
+FINAL_RELEASE_REPORT.md
+PILOT_TEST_REPORT.md
+PRODUCTION_AUDIT_REPORT.md
+SECURITY_REPORT.md
+
+# Dağıtım scriptleri
+deploy-production.ps1
+
+# Diğer geçici dosyalar
+*.old
+*.new
+check-*.mjs
+debug*.mjs
+monitor-*.mjs
+verify-*.mjs
+fix-*.mjs
+test-*.mjs
+test-*.ts
+test-api.mjs
+test-automation.mjs
+test-category-mapping.mjs
+test-comprehensive.mjs
+test-extract.mjs
+test-parse.mjs
+test-server.mjs
+test-sync.mjs
+test-vcm.mjs
+test-xml-structure.mjs
