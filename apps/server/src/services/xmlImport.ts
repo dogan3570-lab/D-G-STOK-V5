@@ -766,16 +766,16 @@ export async function importXmlProducts(xml: string, options?: { actorUserId?: s
 
     console.log(`[Import] Completed: ${totalImported} created, ${totalUpdated} updated, ${failedCount} failed, ${skippedCount} skipped in ${durationMs}ms`);
 
-    // Otomatik varyant analizini tetikle (arka planda)
+    // V5 Pipeline ile otomatik varyant analizini tetikle (arka planda)
     if (options?.sourceId && totalImported > 0) {
       try {
-        const { analyzeAllProducts } = await import('./variantEngineV2.ts');
+        const { runV5Pipeline } = await import('./variantEngineV5/index.ts');
         // Arka planda çalıştır, beklemeye gerek yok
-        analyzeAllProducts(options.sourceId).catch((err: any) =>
-          console.error('[Variant] Auto-analysis error:', err)
+        runV5Pipeline(options.sourceId).catch((err: any) =>
+          console.error('[V5] Auto-analysis error:', err)
         );
       } catch (err) {
-        console.error('[Variant] Auto-analysis init error:', err);
+        console.error('[V5] Auto-analysis init error:', err);
       }
     }
 

@@ -6,7 +6,7 @@ import { actionsRouter } from './actions.ts';
 import { fetchXmlFromUrl, importXmlProducts } from '../services/xmlImport.ts';
 import xmlSourcesRoutes from './xmlSources.ts';
 import categoriesRoutes from './categories.ts';
-import variantsRoutes from './variants.ts';
+import variantsRoutes from './variantsV5.ts';
 import automationRoutes from './automation.ts';
 import reportsRoutes from './reports.ts';
 import productsRoutes from './products.ts';

@@ -4,6 +4,7 @@ import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
 import { EventBus } from '../services/eventBus/EventBus.ts';
 import { createCorrelationId } from '../services/eventBus/events.ts';
+import { matchBrand } from '../services/aiEngine.ts';
 
 const router = Router();
 
@@ -308,47 +309,100 @@ router.post('/bulk-match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), asyn
   } catch (error) { console.error('[brands] POST bulk-match error:', error); res.status(500).json({ error: { code: 'DB_ERROR', message: 'Toplu e\u015fle\u015ftirme ba\u015far\u0131s\u0131z' } }); }
 });
 
-// ==================== AI MATCH ====================
+// ==================== AI MATCH (V2 - AI ENGINE İLE) ====================
 
 router.post('/ai-match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req: Request, res: Response) => {
   try {
     const { productIds } = req.body;
     const where: any = { brandMatch: false };
     if (Array.isArray(productIds) && productIds.length > 0) where.id = { in: productIds };
-    const products = await prisma.product.findMany({ where, select: { id: true, title: true, xmlKey: true, description: true, brand: { select: { id: true, name: true } } } });
+
+    const products = await prisma.product.findMany({
+      where,
+      select: {
+        id: true, title: true, xmlKey: true, description: true, barcode: true,
+        brand: { select: { id: true, name: true } },
+        xmlSource: { select: { name: true } },
+      },
+    });
     const systemBrands = await prisma.brand.findMany({ where: { isActive: true } });
-    let matchedCount = 0, autoMappingCount = 0;
+
+    let matchedCount = 0;
+    let suggestedCount = 0;
+    let manualCount = 0;
     const results: Array<{ productId: string; productName: string; currentBrand: string; suggestedBrand: string | null; confidence: number }> = [];
+    const toUpdateMatch: Array<{ id: string; brandId: string; score: number }> = [];
+
     for (const product of products) {
-      const currentBrandName = (product.brand?.name || '').toLowerCase().trim();
-      if (!currentBrandName) continue;
-      const existingMapping = await prisma.brandMapping.findUnique({ where: { xmlBrandName: product.brand!.name } });
-      if (existingMapping) {
-        const dgBrand = systemBrands.find(b => b.id === existingMapping.dgBrandId);
-        if (dgBrand && dgBrand.id !== product.brand?.id) {
-          await prisma.product.update({ where: { id: product.id }, data: { brandId: dgBrand.id, brandMatch: true, matchedBy: 'auto', lastMatchDate: new Date(), brandUsageType: 'DG_BRAND' } });
-          matchedCount++; autoMappingCount++; results.push({ productId: product.id, productName: product.title || product.xmlKey, currentBrand: product.brand?.name || '', suggestedBrand: dgBrand.name, confidence: 100 }); continue;
+      const result = await matchBrand(
+        {
+          id: product.id,
+          title: product.title,
+          xmlKey: product.xmlKey,
+          xmlBrandName: product.brand?.name || null,
+          description: product.description,
+          barcode: product.barcode,
+          supplierName: product.xmlSource?.name || null,
+          currentBrandId: product.brand?.id || null,
+        },
+        systemBrands
+      );
+
+      results.push({
+        productId: result.productId,
+        productName: result.productName,
+        currentBrand: product.brand?.name || '',
+        suggestedBrand: result.suggestedBrand,
+        confidence: result.confidence,
+      });
+
+      if (result.status === 'auto_matched' && result.suggestedBrandId) {
+        toUpdateMatch.push({
+          id: result.productId,
+          brandId: result.suggestedBrandId,
+          score: result.confidence,
+        });
+        matchedCount++;
+
+        // BrandMapping öğrenme kaydı
+        if (product.brand?.name) {
+          try {
+            await prisma.brandMapping.upsert({
+              where: { xmlBrandName: product.brand.name },
+              update: { dgBrandId: result.suggestedBrandId, confidence: result.confidence, isAuto: true },
+              create: { xmlBrandName: product.brand.name, dgBrandId: result.suggestedBrandId, confidence: result.confidence, isAuto: true },
+            });
+          } catch {}
         }
-      }
-      let bestMatch: { id: string; name: string; score: number } | null = null;
-      for (const sb of systemBrands) {
-        if (sb.id === product.brand?.id) continue;
-        const sysName = sb.name.toLowerCase().trim(); let score = 0;
-        if (normalizeBrandName(currentBrandName) === normalizeBrandName(sysName)) score = 98;
-        else if (currentBrandName === sysName) score = 95;
-        else if (currentBrandName.replace(/[ığüşöçİĞÜŞÖÇ]/g, '') === sysName.replace(/[ığüşöçİĞÜŞÖÇ]/g, '')) score = 90;
-        else if (currentBrandName.includes(sysName) || sysName.includes(currentBrandName)) score = 85;
-        else { const dist = levenshtein(currentBrandName, sysName); const maxLen = Math.max(currentBrandName.length, sysName.length); if (maxLen > 0) score = Math.max(0, (1 - dist / maxLen) * 100); }
-        if (score > 60 && (!bestMatch || score > bestMatch.score)) bestMatch = { id: sb.id, name: sb.name, score };
-      }
-      if (!bestMatch && product.title && !product.brand?.id) for (const sb of systemBrands) { if (product.title.toLowerCase().includes(sb.name.toLowerCase())) { if (!bestMatch || 75 > bestMatch.score) bestMatch = { id: sb.id, name: sb.name, score: 75 }; } }
-      if (bestMatch && bestMatch.score >= 70 && bestMatch.id !== product.brand?.id) {
-        await prisma.product.update({ where: { id: product.id }, data: { brandId: bestMatch.id, brandMatch: true, matchedBy: 'ai', lastMatchDate: new Date(), brandUsageType: 'DG_BRAND' } });
-        matchedCount++; results.push({ productId: product.id, productName: product.title || product.xmlKey, currentBrand: product.brand?.name || '', suggestedBrand: bestMatch.name, confidence: Math.round(bestMatch.score) });
-        try { await prisma.brandMapping.upsert({ where: { xmlBrandName: product.brand?.name || currentBrandName }, update: { dgBrandId: bestMatch.id, confidence: bestMatch.score, isAuto: true }, create: { xmlBrandName: product.brand?.name || currentBrandName, dgBrandId: bestMatch.id, confidence: bestMatch.score, isAuto: true } }); } catch {}
+      } else if (result.status === 'suggested') {
+        suggestedCount++;
+      } else if (result.status === 'manual_review') {
+        manualCount++;
       }
     }
-    await createBrandLog({ action: 'AI_MATCH', productCount: matchedCount, details: JSON.stringify({ autoMappingCount, totalScanned: products.length }), actorUserId: (req as AuthedRequest).actor?.userId });
+
+    // Toplu güncelleme
+    for (const m of toUpdateMatch) {
+      try {
+        await prisma.product.update({
+          where: { id: m.id },
+          data: {
+            brandId: m.brandId,
+            brandMatch: true,
+            matchedBy: 'ai',
+            lastMatchDate: new Date(),
+            brandUsageType: 'DG_BRAND',
+          },
+        });
+      } catch {}
+    }
+
+    await createBrandLog({
+      action: 'AI_MATCH',
+      productCount: matchedCount,
+      details: JSON.stringify({ matchedCount, suggestedCount, manualCount, totalScanned: products.length }),
+      actorUserId: (req as AuthedRequest).actor?.userId,
+    });
 
     // EVENT: AI marka eşleştirme
     if (matchedCount > 0) {
@@ -370,8 +424,18 @@ router.post('/ai-match', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async 
       });
     }
 
-    res.json({ matchedCount, totalProducts: products.length, autoMappingCount, message: `${matchedCount} \u00fcr\u00fcn AI ile e\u015fle\u015ftirildi (${autoMappingCount} otomatik mapping)`, results });
-  } catch (error) { console.error('[brands] POST ai-match error:', error); res.status(500).json({ error: { code: 'DB_ERROR', message: 'AI e\u015fle\u015ftirme ba\u015far\u0131s\u0131z' } }); }
+    res.json({
+      matchedCount,
+      suggestedCount,
+      manualCount,
+      totalProducts: products.length,
+      message: `${matchedCount} ürün AI ile eşleştirildi, ${suggestedCount} öneri, ${manualCount} manuel inceleme`,
+      results,
+    });
+  } catch (error) {
+    console.error('[brands] POST ai-match error:', error);
+    res.status(500).json({ error: { code: 'DB_ERROR', message: 'AI eşleştirme başarısız' } });
+  }
 });
 
 // ==================== PREFIX ====================

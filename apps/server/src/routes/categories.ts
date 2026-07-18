@@ -4,6 +4,7 @@ import { prisma } from '../db/prisma.ts';
 import { requireAuth } from '../auth/authMiddleware.ts';
 import { EventBus } from '../services/eventBus/EventBus.ts';
 import { createCorrelationId } from '../services/eventBus/events.ts';
+import { matchCategory } from '../services/aiEngine.ts';
 
 const router = Router();
 
@@ -129,14 +130,12 @@ router.get('/marketplace-categories', requireAuth, async (req: Request, res: Res
   }
 });
 
-// ==================== AI AUTO-MATCH (OPTIMIZED) ====================
+// ==================== AI AUTO-MATCH (V2 - AI ENGINE İLE) ====================
 const BATCH_SIZE_AI = 500;
-const MATCH_THRESHOLD = 30;
 
 router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { productIds, threshold } = req.body;
-    const minScore = threshold ?? MATCH_THRESHOLD;
+    const { productIds } = req.body;
     const where: any = { categoryMatch: false };
     if (Array.isArray(productIds) && productIds.length > 0) where.id = { in: productIds };
 
@@ -145,27 +144,14 @@ router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
       return res.json({ matchedCount: 0, totalProducts: 0, message: 'Eşleştirilecek ürün bulunamadı', results: [] });
     }
 
-    // Kategorileri önceden yükle ve normalize et
+    // Sistem kategorilerini yükle
     const systemCategories = await prisma.category.findMany({
       select: { id: true, name: true, parentId: true },
     });
 
-    // Kategori adı index'i oluştur (hızlı arama için)
-    const catIndex = new Map<string, { id: string; name: string }>();
-    for (const cat of systemCategories) {
-      const normalized = cat.name.toLowerCase().trim();
-      catIndex.set(normalized, { id: cat.id, name: cat.name });
-      // Alt kategorileri de ekle
-      const words = normalized.split(/[\s>\/\\,]+/).filter(Boolean);
-      for (const word of words) {
-        if (word.length > 2 && !catIndex.has(word)) {
-          catIndex.set(word, { id: cat.id, name: cat.name });
-        }
-      }
-    }
-
     let matchedCount = 0;
     let suggestedCount = 0;
+    let manualCount = 0;
     const matchResults: Array<{ productId: string; productName: string; suggestedCategory: string | null; confidence: number; reason: string }> = [];
     const toUpdateMatch: Array<{ id: string; categoryId: string; score: number }> = [];
     const toUpdateSuggest: Array<{ id: string; categoryId: string; score: number }> = [];
@@ -176,88 +162,68 @@ router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
     for (let batch = 0; batch < totalBatches; batch++) {
       const products = await prisma.product.findMany({
         where,
-        select: { id: true, title: true, xmlKey: true, supplierCategory: true, description: true, brand: { select: { name: true } } },
+        select: {
+          id: true, title: true, xmlKey: true, supplierCategory: true,
+          description: true,
+          brand: { select: { name: true } },
+          xmlSource: { select: { name: true } },
+        },
         skip: batch * BATCH_SIZE_AI,
         take: BATCH_SIZE_AI,
       });
 
       for (const product of products) {
-        const searchText = [
-          product.title || '', product.xmlKey || '',
-          product.supplierCategory || '', product.description || '',
-          product.brand?.name || '',
-        ].join(' ').toLowerCase();
+        // AI Engine ile karar ver
+        const result = await matchCategory(
+          {
+            id: product.id,
+            title: product.title,
+            xmlKey: product.xmlKey,
+            supplierCategory: product.supplierCategory,
+            description: product.description,
+            brandName: product.brand?.name || null,
+            xmlSourceName: product.xmlSource?.name || null,
+          },
+          systemCategories
+        );
 
-        let bestMatch: { id: string; name: string; score: number; reason: string } | null = null;
+        matchResults.push({
+          productId: result.productId,
+          productName: result.productName,
+          suggestedCategory: result.suggestedCategory,
+          confidence: result.confidence,
+          reason: result.reason,
+        });
 
-        // 1. Tam eşleşme kontrolü (en hızlı)
-        if (product.supplierCategory) {
-          const supplierNorm = product.supplierCategory.toLowerCase().trim();
-          const directMatch = catIndex.get(supplierNorm);
-          if (directMatch) {
-            bestMatch = { id: directMatch.id, name: directMatch.name, score: 95, reason: `XML kategorisi "${product.supplierCategory}" ile tam eşleşti` };
-          }
-        }
-
-        // 2. Keyword bazlı eşleşme (eğer tam eşleşme yoksa)
-        if (!bestMatch) {
-          const searchWords = searchText.split(/[\s,;:!?.\-()\[\]{}<>\/\\]+/).filter(w => w.length > 2);
-          const uniqueWords = [...new Set(searchWords)];
-
-          for (const word of uniqueWords) {
-            const match = catIndex.get(word);
-            if (match) {
-              const score = Math.min(90, Math.round((word.length / Math.max(searchText.length, 1)) * 100 + 50));
-              if (!bestMatch || score > bestMatch.score) {
-                bestMatch = { id: match.id, name: match.name, score, reason: `"${word}" anahtar kelimesi "${match.name}" kategorisiyle eşleşti` };
-              }
-            }
-          }
-        }
-
-        // 3. Marka bazlı eşleşme
-        if (!bestMatch && product.brand?.name) {
-          const brandLower = product.brand.name.toLowerCase();
-          for (const [key, cat] of catIndex) {
-            if (key.includes(brandLower) || brandLower.includes(key)) {
-              bestMatch = { id: cat.id, name: cat.name, score: 65, reason: `Marka "${product.brand.name}" ile ilişkili kategori` };
-              break;
-            }
-          }
-        }
-
-        if (bestMatch && bestMatch.score > minScore) {
-          toUpdateMatch.push({ id: product.id, categoryId: bestMatch.id, score: bestMatch.score });
-          matchedCount++;
-          matchResults.push({
-            productId: product.id,
-            productName: product.title || product.xmlKey,
-            suggestedCategory: bestMatch.name,
-            confidence: Math.round(bestMatch.score),
-            reason: bestMatch.reason,
+        if (result.status === 'auto_matched' && result.suggestedCategoryId) {
+          toUpdateMatch.push({
+            id: result.productId,
+            categoryId: result.suggestedCategoryId,
+            score: result.confidence,
           });
-        } else if (bestMatch) {
-          toUpdateSuggest.push({ id: product.id, categoryId: bestMatch.id, score: bestMatch.score });
+          matchedCount++;
+        } else if (result.status === 'suggested' && result.suggestedCategoryId) {
+          toUpdateSuggest.push({
+            id: result.productId,
+            categoryId: result.suggestedCategoryId,
+            score: result.confidence,
+          });
           suggestedCount++;
+        } else if (result.status === 'manual_review') {
+          manualCount++;
         }
       }
     }
 
-    // Toplu güncelleme (N+1 sorunu çözüldü)
+    // Toplu güncelleme (auto-match)
     if (toUpdateMatch.length > 0) {
-      // Batch'ler halinde updateMany
       for (let i = 0; i < toUpdateMatch.length; i += BATCH_SIZE_AI) {
         const batch = toUpdateMatch.slice(i, i + BATCH_SIZE_AI);
         const ids = batch.map(m => m.id);
         await prisma.product.updateMany({
           where: { id: { in: ids } },
-          data: {
-            categoryMatch: true,
-            matchedBy: 'ai',
-            lastMatchDate: new Date(),
-          },
+          data: { categoryMatch: true, matchedBy: 'ai', lastMatchDate: new Date() },
         });
-        // Her ürün için ayrı categoryId ve aiScore güncellemesi
         for (const m of batch) {
           await prisma.product.update({
             where: { id: m.id },
@@ -267,6 +233,7 @@ router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
+    // Toplu güncelleme (suggested)
     if (toUpdateSuggest.length > 0) {
       for (let i = 0; i < toUpdateSuggest.length; i += BATCH_SIZE_AI) {
         const batch = toUpdateSuggest.slice(i, i + BATCH_SIZE_AI);
@@ -283,8 +250,8 @@ router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
       data: {
         action: 'AI_CATEGORY_MATCH',
         entity: 'category',
-        meta: JSON.stringify({ matchedCount, suggestedCount, totalCount }),
-        details: `AI ile ${matchedCount} ürün eşleştirildi, ${suggestedCount} ürün için öneri oluşturuldu`,
+        meta: JSON.stringify({ matchedCount, suggestedCount, manualCount, totalCount }),
+        details: `AI ile ${matchedCount} ürün eşleştirildi, ${suggestedCount} öneri, ${manualCount} manuel inceleme`,
         actorUserId: (req as any).actor?.userId || null,
       },
     });
@@ -312,8 +279,9 @@ router.post('/ai-match', requireAuth, async (req: Request, res: Response) => {
     res.json({
       matchedCount,
       suggestedCount,
+      manualCount,
       totalProducts: totalCount,
-      message: `${matchedCount} ürün AI ile eşleştirildi, ${suggestedCount} öneri`,
+      message: `${matchedCount} ürün AI ile eşleştirildi, ${suggestedCount} öneri, ${manualCount} manuel inceleme`,
       results: matchResults,
     });
   } catch (error) {
