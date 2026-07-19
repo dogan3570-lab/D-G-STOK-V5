@@ -13,7 +13,7 @@ import { categoryEngine } from './categoryEngine.ts';
 import { toV5Product, sleep } from './helpers.ts';
 import { DEFAULT_PIPELINE_CONFIG } from './constants.ts';
 import { syncVariantFields } from '../variant/VariantConsistencyService.ts';
-import { refreshWorkflowForProduct } from '../workflowEngine.ts';
+import { WorkflowStateManager } from '../workflow/WorkflowStateManager.ts';
 
 export class Pipeline implements IPipeline {
   private config = DEFAULT_PIPELINE_CONFIG;
@@ -117,7 +117,7 @@ export class Pipeline implements IPipeline {
             // variantMatch alanını senkronize et
             await syncVariantFields(decision.productId);
             // KURAL 6: WorkflowState otomatik güncelle
-            await refreshWorkflowForProduct(decision.productId);
+            await WorkflowStateManager.syncFromProduct(decision.productId);
           } catch { /* ignore */ }
         }
 

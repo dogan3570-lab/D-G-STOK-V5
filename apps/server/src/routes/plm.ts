@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth, type AuthedRequest } from '../auth/authMiddleware.ts';
-import { calculateReadiness } from '../services/workflowEngine.ts';
+import { WorkflowStateManager } from '../services/workflow/WorkflowStateManager.ts';
 
 const router = Router();
 
@@ -24,7 +24,7 @@ router.get('/product/:id', requireAuth, async (req: Request, res: Response) => {
     });
     if (!product) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Product not found' } });
 
-    const { score, steps } = await calculateReadiness(product);
+    const { score, steps } = await WorkflowStateManager.calculateReadiness(product.id);
     const history = await prisma.productHistory.findMany({
       where: { productId: product.id },
       orderBy: { createdAt: 'desc' },

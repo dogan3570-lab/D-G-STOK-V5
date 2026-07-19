@@ -12,7 +12,7 @@ export default function Orchestrator() {
     { key: 'policy', label: 'Brand Policy Engine', icon: '📋', desc: '7 marka politikası, XML kaynağı bazlı kurallar', color: 'purple', api: '/brand-policies', stats: {} },
     { key: 'transform', label: 'Transformation V7', icon: '🔄', desc: 'Marka dönüşümü, başlık temizleme, validasyon', color: 'cyan', api: '/transform/logs', stats: {} },
     { key: 'title', label: 'Title Intelligence V8', icon: '📝', desc: 'Şablonlu başlık oluşturma, 12 değişken', color: 'teal', api: '/title/templates', stats: {} },
-    { key: 'workflow', label: 'Workflow V1', icon: '⚡', desc: 'Ürün yaşam döngüsü, hazırlık skoru', color: 'green', api: '/workflow/stats', stats: {} },
+    { key: 'workflow', label: 'Workflow State', icon: '⚡', desc: 'Ürün yaşam döngüsü, hazırlık skoru', color: 'green', api: '/workflow-state/stats', stats: {} },
     { key: 'ai', label: 'AI Decision V1', icon: '🤖', desc: 'AI öğrenme, güven puanı, otomatik karar', color: 'violet', api: '/ai/stats', stats: {} },
     { key: 'plm', label: 'PLM V1', icon: '📊', desc: '24 aşamalı ürün yaşam döngüsü, sağlık skoru', color: 'orange', api: '/plm/health', stats: {} },
     { key: 'rules', label: 'Rule Engine V1', icon: '🔧', desc: '11 operatör, görsel kural oluşturma', color: 'red', api: '/rules', stats: {} },

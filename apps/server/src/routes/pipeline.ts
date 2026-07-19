@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
-import { calculateReadiness } from '../services/workflowEngine.ts';
+import { WorkflowStateManager } from '../services/workflow/WorkflowStateManager.ts';
 import { analyzeProduct } from '../services/dqcEngine.ts';
 import { generateTitle } from '../services/titleEngine.ts';
 
@@ -50,7 +50,7 @@ router.post('/start/:xmlSourceId', requireAuth, requireRole(['ADMIN', 'OPERATOR'
             case 'TITLE': if (product.computedTitle) await generateTitle(product.id); break;
             case 'SEO': break;
             case 'IMAGE': break;
-            case 'VALIDATION': await calculateReadiness(product); break;
+            case 'VALIDATION': await WorkflowStateManager.calculateReadiness(product.id); break;
             case 'RULE_ENGINE': break;
             case 'MARKETPLACE': break;
           }

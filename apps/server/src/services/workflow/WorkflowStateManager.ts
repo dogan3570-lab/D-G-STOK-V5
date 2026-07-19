@@ -1,4 +1,4 @@
-// ==================== WORKFLOW STATE MANAGER V2.0 ====================
+// ==================== WORKFLOW STATE MANAGER V2.0 (TEK KAYNAK) ====================
 // DG STOK V5.0 - Merkezi WorkflowState Yönetim Sistemi
 //
 // KURAL 6: Kategori değişirse → Marka, Varyant, Şablon yeniden hesaplanır
@@ -362,6 +362,61 @@ export class WorkflowStateManager {
       },
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Readiness skoruna göre renk döndürür (UI için)
+   */
+  static getReadinessColor(score: number): string {
+    if (score >= 100) return 'bg-green-500 text-white';
+    if (score >= 80) return 'bg-yellow-400 text-black';
+    if (score >= 60) return 'bg-orange-400 text-white';
+    if (score >= 40) return 'bg-red-400 text-white';
+    return 'bg-red-700 text-white';
+  }
+
+  /**
+   * Readiness skoruna göre status döndürür
+   */
+  static getStatusFromScore(score: number): string {
+    if (score >= 100) return 'READY';
+    if (score >= 80) return 'NEEDS_REVIEW';
+    if (score >= 60) return 'HAS_ISSUES';
+    if (score >= 40) return 'CANNOT_SEND';
+    return 'CRITICAL';
+  }
+
+  /**
+   * Bir productId için readiness hesaplar (WorkflowState üzerinden)
+   * pipeline.ts, plm.ts, twin.ts tarafından kullanılır
+   * @returns { score, steps } - workflowEngine.ts calculateReadiness ile uyumlu
+   */
+  static async calculateReadiness(productId: string): Promise<{ score: number; steps: Record<string, string> }> {
+    const ws = await prisma.workflowState.findUnique({ where: { productId } });
+    if (!ws) {
+      return { score: 0, steps: { stepCategory: 'MISSING', stepBrand: 'MISSING', stepVariant: 'MISSING', stepTitle: 'MISSING' } };
+    }
+
+    const steps: Record<string, string> = {
+      stepCategory: ws.stepCategory || 'MISSING',
+      stepBrand: ws.stepBrand || 'MISSING',
+      stepVariant: ws.stepVariant || 'MISSING',
+      stepTitle: ws.stepTitle || 'MISSING',
+    };
+
+    const weights: Record<string, number> = {
+      stepCategory: 25,
+      stepBrand: 25,
+      stepVariant: 20,
+      stepTitle: 30,
+    };
+
+    let score = 0;
+    for (const [field, weight] of Object.entries(weights)) {
+      if (steps[field] === 'OK') score += weight;
+    }
+
+    return { score, steps };
   }
 
   /**

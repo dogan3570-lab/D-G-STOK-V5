@@ -34,7 +34,7 @@ import { DescriptionEngine } from './engines/DescriptionEngine.ts';
 import { ReadyToSendEngine } from './engines/ReadyToSendEngine.ts';
 import { SummaryService } from './SummaryService.ts';
 import { syncVariantFields } from '../variant/VariantConsistencyService.ts';
-import { refreshWorkflowForProduct } from '../workflowEngine.ts';
+import { WorkflowStateManager } from '../workflow/WorkflowStateManager.ts';
 import { DashboardService } from '../dashboard/DashboardService.ts';
 
 export interface RecalculationLog {
@@ -103,7 +103,7 @@ export class AutoRecalculationEngine {
 
       // === STEP 9: Workflow Engine ===
       s = Date.now();
-      await refreshWorkflowForProduct(productId);
+      await WorkflowStateManager.syncFromProduct(productId);
       steps.push({ name: 'Workflow', durationMs: Date.now() - s, changed: true });
 
       // === STEP 10: ReadyToSend Engine ===
