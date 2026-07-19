@@ -2,6 +2,8 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
+import { EventBus } from '../services/eventBus/EventBus.ts';
+import { createCorrelationId } from '../services/eventBus/events.ts';
 import { actionsRouter } from './actions.ts';
 import { fetchXmlFromUrl, importXmlProducts } from '../services/xmlImport.ts';
 import xmlSourcesRoutes from './xmlSources.ts';
@@ -568,6 +570,16 @@ router.put('/orders/:id', requireAuth, async (req, res) => {
     if (cargoCompany) data.cargoCompany = cargoCompany;
     if (trackingNo) data.trackingNo = trackingNo;
     const item = await prisma.order.update({ where: { id: req.params.id }, data });
+
+    // EventBus: Sipariş durumu değişti
+    EventBus.emit({
+      type: 'DashboardRefresh',
+      correlationId: createCorrelationId('API'),
+      timestamp: new Date().toISOString(),
+      source: 'OrderManagement',
+      data: { reason: status ? `order_${status}` : 'order_updated', affectedProductIds: [] },
+    });
+
     return res.json({ item });
   } catch (error) {
     return handleDbError(res, error);

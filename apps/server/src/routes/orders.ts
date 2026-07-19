@@ -1,11 +1,15 @@
 // ==================== SİPARİŞ YÖNETİM MERKEZİ V5.0 ====================
 // DG STOK V5.0 - Tüm pazaryerleri için tek sipariş merkezi
+// EventBus + WorkflowState entegre
 // ====================================================================
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
+import { EventBus } from '../services/eventBus/EventBus.ts';
+import { createCorrelationId } from '../services/eventBus/events.ts';
+import { WorkflowStateManager } from '../services/workflow/WorkflowStateManager.ts';
 
 const router = Router();
 
