@@ -28,7 +28,7 @@ export default function BrandMatchTab() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const r = await apiFetch<any>('/brands/v3/stats');
+      const r = await apiFetch<any>('/brands/stats');
       if (r.ok && r.data?.stats) setStats(r.data.stats);
     } catch {}
   }, []);
@@ -37,13 +37,13 @@ export default function BrandMatchTab() {
     try {
       const p = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (search) p.append('search', search);
-      const r = await apiFetch<any>(`/brands/v3/list?${p}`);
+      const r = await apiFetch<any>(`/brands/list?${p}`);
       if (r.ok && r.data) { setRows(r.data.items || []); setTotal(r.data.pagination?.total || 0); }
     } finally { setLoading(false); }
   }, [page, pageSize, search]);
   const fetchBrands = useCallback(async () => { try { const r = await apiFetch<any>('/brands'); if (r.ok && r.data) setSystemBrands(r.data.items || []); } catch {} }, []);
-  const fetchDefaultBrand = useCallback(async () => { try { const r = await apiFetch<any>('/brands/v3/default-brand'); if (r.ok && r.data) { setBrandInput(r.data.defaultBrand); } } catch {} }, []);
-  const fetchPreview = useCallback(async (name: string) => { try { const r = await apiFetch<any>(`/brands/v3/preview/${encodeURIComponent(name)}`); if (r.ok && r.data?.preview) setPreview(r.data.preview); } catch {} }, []);
+  const fetchDefaultBrand = useCallback(async () => { try { const r = await apiFetch<any>('/brands/default-brand'); if (r.ok && r.data) { setBrandInput(r.data.defaultBrand); } } catch {} }, []);
+  const fetchPreview = useCallback(async (name: string) => { try { const r = await apiFetch<any>(`/brands/preview/${encodeURIComponent(name)}`); if (r.ok && r.data?.preview) setPreview(r.data.preview); } catch {} }, []);
 
   useEffect(() => { fetchStats(); fetchBrands(); fetchDefaultBrand(); }, []);
   useEffect(() => { fetchRows(); }, [fetchRows]);
@@ -52,12 +52,12 @@ export default function BrandMatchTab() {
 
   const handleQuickMatch = async (xmlBrand: string, customBrandName?: string) => {
     if (!customBrandName) return;
-    const r = await apiFetch<any>('/brands/v3/match', { method: 'POST', body: JSON.stringify({ xmlBrandName: xmlBrand, customBrandName }) });
+    const r = await apiFetch<any>('/brands/match', { method: 'POST', body: JSON.stringify({ xmlBrandName: xmlBrand, customBrandName }) });
     if (r.ok) { showToast('success', `✅ ${xmlBrand} → ${customBrandName}`); setSelectedXmlBrand(null); setPreview(null); fetchStats(); fetchRows(); }
   };
 
-  const handleAiMatch = async () => { setAiRunning(true); try { const r = await apiFetch<any>('/brands/v3/ai-match', { method: 'POST' }); if (r.ok) { showToast('success', `🤖 ${r.data?.matchedCount || 0} eslestirildi`); fetchStats(); fetchRows(); } } finally { setAiRunning(false); } };
-  const handleSaveDefaultBrand = async () => { if (!brandInput.trim()) return; const r = await apiFetch<any>('/brands/v3/default-brand', { method: 'PUT', body: JSON.stringify({ brand: brandInput.trim() }) }); if (r.ok) showToast('success', `✅ ${brandInput.trim()}`); };
+  const handleAiMatch = async () => { setAiRunning(true); try { const r = await apiFetch<any>('/brands/ai-match', { method: 'POST' }); if (r.ok) { showToast('success', `🤖 ${r.data?.matchedCount || 0} eslestirildi`); fetchStats(); fetchRows(); } } finally { setAiRunning(false); } };
+  const handleSaveDefaultBrand = async () => { if (!brandInput.trim()) return; const r = await apiFetch<any>('/brands/default-brand', { method: 'PUT', body: JSON.stringify({ brand: brandInput.trim() }) }); if (r.ok) showToast('success', `✅ ${brandInput.trim()}`); };
 
   const handleRowClick = async (row: BrandRow) => {
     if (selectedXmlBrand === row.xmlBrand) { setSelectedXmlBrand(null); setPreview(null); return; }

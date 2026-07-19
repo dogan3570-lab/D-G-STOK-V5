@@ -598,4 +598,59 @@ router.delete('/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (re
   }
 });
 
+// ==================== V3 UYUMLULUK ENDPOINT'LERİ ====================
+
+// GET /brands/preview/:xmlBrandName - Marka önizleme
+router.get('/preview/:xmlBrandName', requireAuth, async (req: any, res: any) => {
+  try {
+    const product = await prisma.product.findFirst({
+      where: { brand: { name: req.params.xmlBrandName } },
+      include: { category: { select: { name: true } }, brand: { select: { name: true } } },
+    });
+    if (!product) return res.json({ ok: true, preview: null });
+
+    const setting = await prisma.setting.findUnique({ where: { key: 'default_brand' } });
+    const selectedBrand = setting?.value || 'DG STORE';
+    const productName = product.title || product.xmlKey;
+    const finalTitle = `${selectedBrand}® ${productName}`;
+
+    return res.json({
+      ok: true, preview: {
+        xmlBrand: product.brand?.name || '', productName,
+        category: product.category?.name || '', barcode: product.barcode || '',
+        sku: product.sku || '', selectedBrand, finalTitle, finalBrand: selectedBrand,
+        formatDescription: 'Marka® Ürün Adı şeklinde pazaryerine gönderilecek',
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'DB_ERROR', message: 'Önizleme alınamadı' } });
+  }
+});
+
+// GET /brands/default-brand - Varsayılan marka
+router.get('/default-brand', requireAuth, async (_req: any, res: any) => {
+  try {
+    const setting = await prisma.setting.findUnique({ where: { key: 'default_brand' } });
+    return res.json({ ok: true, defaultBrand: setting?.value || 'DG STORE' });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'DB_ERROR', message: 'Varsayılan marka alınamadı' } });
+  }
+});
+
+// PUT /brands/default-brand - Varsayılan marka güncelle
+router.put('/default-brand', requireAuth, requireRole(['ADMIN']), async (req: any, res: any) => {
+  try {
+    const { brand } = req.body;
+    if (!brand || !brand.trim()) return res.status(400).json({ ok: false, error: 'brand zorunludur' });
+    await prisma.setting.upsert({
+      where: { key: 'default_brand' },
+      update: { value: brand.trim() },
+      create: { key: 'default_brand', value: brand.trim() },
+    });
+    return res.json({ ok: true, defaultBrand: brand.trim() });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'DB_ERROR', message: 'Varsayılan marka güncellenemedi' } });
+  }
+});
+
 export default router;
