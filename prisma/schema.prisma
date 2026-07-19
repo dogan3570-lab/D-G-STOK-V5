@@ -1025,3 +1025,26 @@ model AIVariantSuggestion {
   @@index([variantType])
   @@index([approved])
 }
+
+model AIContentSuggestion {
+  id                 String    @id @default(uuid())
+  productId          String
+  marketplace        String    @default("trendyol")
+  currentTitle       String?
+  suggestedTitle     String?
+  currentDescription String?
+  suggestedDescription String?
+  keywords           String?   // JSON array
+  forbiddenWords     String?   // JSON array
+  titleScore         Int       @default(0)
+  descriptionScore   Int       @default(0)
+  seoScore           Int       @default(0)
+  overallScore       Int       @default(0)
+  confidence         Float?
+  approved           Boolean   @default(false)
+  approvedAt         DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@index([productId])
+  @@index([marketplace])
+}

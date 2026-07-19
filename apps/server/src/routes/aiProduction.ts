@@ -8,6 +8,7 @@ import { prisma } from '../db/prisma.ts';
 import { scanProduct, scanAllProducts, getDashboard } from '../services/aiProduction/scanner.ts';
 import { suggestCategory, scanAllCategories, approveSuggestion, rejectSuggestion } from '../services/aiProduction/categoryEngine.ts';
 import { suggestBrand, scanAllBrands, approveBrand, rejectBrand } from '../services/aiProduction/brandEngine.ts';
+import { analyzeContent, scanAllContent, approveContent, rejectContent } from '../services/aiProduction/contentEngine.ts';
 import { suggestVariants, scanAllVariants, approveVariant, rejectVariant } from '../services/aiProduction/variantEngine.ts';
 import { EventBus } from '../services/eventBus/EventBus.ts';
 import { createCorrelationId } from '../services/eventBus/events.ts';
@@ -267,6 +268,51 @@ router.post('/variant/reject', requireAuth, async (req, res) => {
   try {
     const { suggestionId } = req.body;
     const r = await rejectVariant(suggestionId);
+    res.json({ ok: true, ...r });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// ==================== AI CONTENT & SEO ENGINE ENDPOINT'LERİ ====================
+
+router.get('/content/products', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit ?? 50)));
+    const where: any = {};
+    if (req.query.status === 'pending') where.approved = false;
+    const [items, total] = await Promise.all([
+      prisma.aIContentSuggestion.findMany({ where, orderBy: { overallScore: 'desc' }, skip: (page - 1) * limit, take: limit }),
+      prisma.aIContentSuggestion.count({ where }),
+    ]);
+    res.json({ ok: true, items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.get('/content/:productId', requireAuth, async (req, res) => {
+  try {
+    const result = await analyzeContent(req.params.productId);
+    res.json({ ok: true, ...result });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/content/scan', requireAuth, requireRole(['ADMIN']), async (_req, res) => {
+  try { const r = await scanAllContent(); res.json({ ok: true, ...r }); }
+  catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/content/approve', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    if (!suggestionId) return res.status(400).json({ ok: false, error: 'suggestionId gerekli' });
+    const r = await approveContent(suggestionId);
+    res.json({ ok: true, ...r });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/content/reject', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    const r = await rejectContent(suggestionId);
     res.json({ ok: true, ...r });
   } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
 });
