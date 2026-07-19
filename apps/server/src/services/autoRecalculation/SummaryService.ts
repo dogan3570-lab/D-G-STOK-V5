@@ -20,6 +20,12 @@ export interface ProductSummary {
   autoOpenedToday: number;
   stockApiErrors: number;
 
+  // Marketplace KPI'ları
+  marketplacePendingSend: number;
+  marketplaceSending: number;
+  marketplaceSent: number;
+  marketplaceFailed: number;
+
   // ReadyToSend KPI'lari
   readyForListing: number;
   publishedProducts: number;
@@ -165,6 +171,12 @@ export class SummaryService {
       autoClosedToday: statusMap['MARKETPLACE_CLOSED'] || 0,
       autoOpenedToday: statusMap['MARKETPLACE_OPENED'] || 0,
       stockApiErrors: 0,
+
+      // Marketplace KPI'ları
+      marketplacePendingSend: 0,
+      marketplaceSending: 0,
+      marketplaceSent: 0,
+      marketplaceFailed: 0,
 
       timestamp: new Date().toISOString(),
     };
