@@ -30,6 +30,7 @@ import workflowStateRoutes from './workflowState.ts';
 import readyToSendRoutes from './readyToSend.ts';
 import marketplaceRoutes from './marketplace.ts';
 import pricingRoutes from './pricing.ts';
+import aiCenterRoutes from './aiCenter.ts';
 
 export const router = Router();
 
@@ -75,6 +76,7 @@ router.use('/workflow-state', workflowStateRoutes);
 router.use('/ready-to-send', readyToSendRoutes);
 router.use('/marketplace', marketplaceRoutes);
 router.use('/pricing', pricingRoutes);
+router.use('/ai-center', aiCenterRoutes);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
