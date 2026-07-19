@@ -111,7 +111,7 @@ export default function VariantMatchTab() {
 
   const fetchStats = useCallback(async () => {
     const params = selectedXmlId ? `?xmlSourceId=${selectedXmlId}` : '';
-    const res = await apiFetch<any>(`/variants/v4/stats${params}`);
+    const res = await apiFetch<any>(`/variants/stats${params}`);
     if (res.ok && res.data?.stats) {
       const s = res.data.stats;
       setStats({
@@ -131,7 +131,7 @@ export default function VariantMatchTab() {
   }, []);
 
   const fetchThresholds = useCallback(async () => {
-    const res = await apiFetch<any>('/variants/v4/thresholds');
+    const res = await apiFetch<any>('/variants/thresholds');
     if (res.ok && res.data?.items) setThresholds(res.data.items);
   }, []);
 
@@ -147,7 +147,7 @@ export default function VariantMatchTab() {
         });
         if (selectedXmlId) params.append('xmlSourceId', selectedXmlId);
         return apiFetch<any>(
-          `/variants/v4/problems?${params}`
+          `/variants/problems?${params}`
         );
       });
 
@@ -211,7 +211,7 @@ export default function VariantMatchTab() {
     try {
       showToast('info', '🔍 Varyantlar taranıyor...');
       const res = await apiFetch<any>(
-        `/variants/v4/scan/${selectedXmlId}`,
+        `/variants/scan?xmlSourceId=${selectedXmlId}`,
         { method: 'POST' }
       );
       if (res.ok) {
