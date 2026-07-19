@@ -1048,3 +1048,38 @@ model AIContentSuggestion {
   @@index([productId])
   @@index([marketplace])
 }
+
+model AIProvider {
+  id              String    @id @default(uuid())
+  name            String    @unique // deepseek | openai | gemini | kimi | claude | mock
+  enabled         Boolean   @default(true)
+  priority        Int       @default(1)
+  apiKeyEncrypted String?
+  baseUrl         String?
+  model           String?
+  dailyTokenLimit Int       @default(1000000)
+  usedTokens      Int       @default(0)
+  estimatedCost   Float     @default(0)
+  status          String    @default("unknown") // unknown | healthy | error | rate_limited
+  lastCheck       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model AIRequestLog {
+  id              String   @id @default(uuid())
+  provider        String
+  module          String   // category | brand | variant | content | pricing
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  totalTokens     Int      @default(0)
+  estimatedCost   Float    @default(0)
+  duration        Int      @default(0) // ms
+  success         Boolean  @default(true)
+  error           String?
+  createdAt       DateTime @default(now())
+
+  @@index([provider])
+  @@index([module])
+  @@index([createdAt])
+}

@@ -32,6 +32,7 @@ import marketplaceRoutes from './marketplace.ts';
 import pricingRoutes from './pricing.ts';
 import aiCenterRoutes from './aiCenter.ts';
 import aiProductionRoutes from './aiProduction.ts';
+import aiProviderRoutes from './aiProviders.ts';
 
 export const router = Router();
 
@@ -79,6 +80,7 @@ router.use('/marketplace', marketplaceRoutes);
 router.use('/pricing', pricingRoutes);
 router.use('/ai-center', aiCenterRoutes);
 router.use('/ai', aiProductionRoutes);
+router.use('/ai', aiProviderRoutes);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
