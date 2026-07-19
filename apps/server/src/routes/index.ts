@@ -428,6 +428,74 @@ router.post('/debug/seed-test-user', async (_req, res) => {
   return res.json({ ok: true, created: testUser });
 });
 
+// ==================== STOCK PROTECTION RULES ====================
+router.get('/stock-protection/rules', requireAuth, async (_req, res) => {
+  try {
+    const rules = await prisma.marketplaceStockRule.findMany({
+      include: { marketplace: { select: { id: true, name: true, key: true } } },
+    });
+    return res.json({ items: rules });
+  } catch (error) {
+    return res.json({ items: [] });
+  }
+});
+
+router.put('/stock-protection/rules/:id', requireAuth, async (req, res) => {
+  try {
+    const { minStock, autoCloseEnabled, autoOpenEnabled } = req.body;
+    const data: Record<string, unknown> = {};
+    if (minStock !== undefined) data.minStock = Number(minStock);
+    if (autoCloseEnabled !== undefined) data.autoCloseEnabled = Boolean(autoCloseEnabled);
+    if (autoOpenEnabled !== undefined) data.autoOpenEnabled = Boolean(autoOpenEnabled);
+    const updated = await prisma.marketplaceStockRule.update({
+      where: { id: req.params.id },
+      data,
+    });
+    return res.json({ ok: true, item: updated });
+  } catch (error) {
+    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Kural bulunamadı' } });
+  }
+});
+
+// ==================== CRITICAL STOCK ALERTS ====================
+router.get('/stock-protection/critical', requireAuth, async (_req, res) => {
+  try {
+    const products = await prisma.product.findMany({
+      where: {
+        stock: { lte: 10 },
+        status: 'READY',
+      },
+      take: 50,
+      orderBy: { stock: 'asc' },
+      select: {
+        id: true, sku: true, title: true, stock: true, criticalStockLevel: true,
+      },
+    });
+    return res.json({ items: products });
+  } catch (error) {
+    return res.json({ items: [] });
+  }
+});
+
+// Seed test user for CI/CD integration tests
+router.post('/debug/seed-test-user', async (_req, res) => {
+  const existing = await prisma.user.count({ where: { email: 'test@dgstok.com' } });
+  if (existing > 0) {
+    return res.json({ ok: true, skipped: true, message: 'Test user already exists' });
+  }
+
+  const hashedPassword = await bcrypt.hash('test123456', 10);
+  const testUser = await prisma.user.create({
+    data: {
+      email: 'test@dgstok.com',
+      password: hashedPassword,
+      role: 'ADMIN',
+    },
+  });
+
+  return res.json({ ok: true, created: testUser });
+});
+
 // Brand route'ları apps/server/src/routes/brands.ts dosyasına taşındı
 
 // ==================== ORDERS ====================

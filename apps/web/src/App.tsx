@@ -7,7 +7,7 @@ import XmlSources from './pages/XmlSources';
 import ProductPool from './pages/ProductPool';
 import ProductPreparation from './pages/ProductPreparation';
 import ReadyToSend from './pages/ReadyToSend';
-import MarketplaceManagement from './pages/MarketplaceManagement';
+import MarketplaceControlCenter from './pages/MarketplaceControlCenter';
 import Login from './pages/Login';
 import Orders from './pages/Orders';
 import Reports from './pages/Reports';
@@ -78,7 +78,7 @@ export default function App() {
       case 'varyant':
         return <VariantExceptionScreen />;
       case 'pazaryeri':
-        return <MarketplaceManagement />;
+        return <MarketplaceControlCenter />;
       case 'siparis':
         return <Orders />;
       case 'rapor':
