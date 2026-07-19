@@ -89,17 +89,8 @@ export default function VariantExceptionScreen() {
   // ==================== API ====================
 
   const fetchStats = useCallback(async () => {
-    const res = await apiFetch<any>('/variants/stats');
-    if (res.ok && res.data) {
-      setStats({
-        totalProducts: res.data.totalVariants ?? res.data.matchedProducts ?? 0,
-        xmlVariant: 0,
-        autoCreated: res.data.matchedProducts ?? 0,
-        autoSuggest: 0,
-        manualReview: res.data.unmatchedProducts ?? 0,
-        errors: 0,
-      });
-    }
+    const res = await apiFetch<{ stats: V2Stats }>('/variants/v2/stats');
+    if (res.ok && res.data) setStats(res.data.stats);
   }, []);
 
   const fetchProducts = useCallback(async () => {
@@ -112,7 +103,7 @@ export default function VariantExceptionScreen() {
         ...(search ? { search } : {}),
       });
       const res = await apiFetch<{ items: ScreenProduct[]; total: number }>(
-        `/variants/screen?${params}`
+        `/variants/v2/screen?${params}`
       );
       if (res.ok && res.data) {
         setProducts(res.data.items);
@@ -165,7 +156,7 @@ export default function VariantExceptionScreen() {
     setAutoMatchLoading(true);
     try {
       const res = await apiFetch<{ matched: number; failed: number; preview: AutoMatchPreview[] }>(
-        '/variants/auto-match',
+        '/variants/v2/auto-match',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -191,7 +182,7 @@ export default function VariantExceptionScreen() {
   const handleConfirmAutoMatch = async () => {
     try {
       const res = await apiFetch<{ ok: boolean; totalUpdated: number }>(
-        '/variants/confirm-match',
+        '/variants/v2/confirm-auto-match',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -233,7 +224,7 @@ export default function VariantExceptionScreen() {
 
     try {
       const res = await apiFetch<{ ok: boolean; totalUpdated: number }>(
-        '/variants/manual-match',
+        '/variants/v2/manual-match',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -265,7 +256,7 @@ export default function VariantExceptionScreen() {
 
     try {
       const res = await apiFetch<{ ok: boolean; updated: number }>(
-        '/variants/approve',
+        '/variants/v2/approve-selected',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -294,7 +285,7 @@ export default function VariantExceptionScreen() {
 
     try {
       const res = await apiFetch<{ ok: boolean; stats: V2Stats }>(
-        '/variants/reanalyze',
+        '/variants/v2/reanalyze',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -318,7 +309,7 @@ export default function VariantExceptionScreen() {
     showToast('info', '🔍 Tüm ürünler taranıyor...');
     try {
       const res = await apiFetch<{ ok: boolean; stats: V2Stats }>(
-        '/variants/scan',
+        '/variants/v2/scan',
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
       );
       if (res.ok) {
