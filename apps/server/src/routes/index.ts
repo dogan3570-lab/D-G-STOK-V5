@@ -26,6 +26,7 @@ import contentEngineRouter from './contentEngine.ts';
 import brandsV3Router from './brandsV3.ts';
 import variantsV5Router from './variantsV5.ts';
 import workflowStateRoutes from './workflowState.ts';
+import readyToSendRoutes from './readyToSend.ts';
 
 export const router = Router();
 
@@ -69,6 +70,7 @@ router.use('/content', contentEngineRouter);
 router.use('/brands/v3', brandsV3Router);
 router.use('/variants/v5', variantsV5Router);
 router.use('/workflow-state', workflowStateRoutes);
+router.use('/ready-to-send', readyToSendRoutes);
 
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
