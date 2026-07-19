@@ -1083,3 +1083,38 @@ model AIRequestLog {
   @@index([module])
   @@index([createdAt])
 }
+
+model AIIssue {
+  id                String    @id @default(uuid())
+  productId         String
+  module            String    // category | brand | variant | content | image | price | workflow | marketplace | xml
+  type              String    // CATEGORY_MISSING | BRAND_MISSING | VARIANT_MISSING | CONTENT_MISSING | SEO_LOW | IMAGE_LOW | PRICE_RISK | WORKFLOW_BLOCKED | READY_TO_SEND_FAILED | MARKETPLACE_ERROR | XML_ERROR | BARCODE_ERROR | STOCK_ERROR
+  severity          String    @default("MEDIUM") // CRITICAL | HIGH | MEDIUM | LOW
+  priority          Int       @default(3) // 1-5
+  confidence        Float?
+  title             String?
+  description       String?
+  recommendedAction String?
+  approved          Boolean   @default(false)
+  resolved          Boolean   @default(false)
+  resolvedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@index([productId])
+  @@index([module])
+  @@index([severity])
+  @@index([resolved])
+}
+
+model AIRecommendation {
+  id          String    @id @default(uuid())
+  issueId     String
+  provider    String    @default("ai")
+  prompt      String?
+  response    String?
+  confidence  Float?
+  approved    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@index([issueId])
+}
