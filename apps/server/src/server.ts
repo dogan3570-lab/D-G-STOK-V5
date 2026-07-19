@@ -158,38 +158,36 @@ export function buildServer() {
   attachSseEndpoint(app);
   attachRoutes(app);
 
-  // Production: Serve frontend static files
-  const isProduction = process.env.NODE_ENV === 'production';
-  if (isProduction) {
-    // Try multiple possible locations for the built frontend
-    const possiblePaths = [
-      path.join(__dirname, '../../web/dist'),          // monorepo: compiled: apps/server/dist -> apps/web/dist
-      path.join(__dirname, '../../../apps/web/dist'),  // fallback from compiled
-      path.join(process.cwd(), 'apps/web/dist'),       // cwd based
-      path.join(__dirname, '../../apps/web/dist'),     // tsx runtime: apps/server/src -> apps/web/dist
-    ];
+  // Serve frontend static files (both dev and production)
+  const possiblePaths = [
+    path.join(__dirname, '../../web/dist'),          // monorepo: compiled: apps/server/dist -> apps/web/dist
+    path.join(__dirname, '../../../apps/web/dist'),  // fallback from compiled
+    path.join(process.cwd(), 'apps/web/dist'),       // cwd based
+    path.join(__dirname, '../../apps/web/dist'),     // tsx runtime: apps/server/src -> apps/web/dist
+    path.join(__dirname, '../web/dist'),             // tsx runtime: apps/server/src -> apps/server/../web/dist
+  ];
 
-    let webDistPath = '';
-    for (const p of possiblePaths) {
-      try {
-        if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
-          webDistPath = p;
-          break;
-        }
-      } catch { /* ignore */ }
-    }
+  let webDistPath = '';
+  for (const p of possiblePaths) {
+    try {
+      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+        webDistPath = p;
+        break;
+      }
+    } catch { /* ignore */ }
+  }
 
-    if (webDistPath) {
-      console.log(`[server] Serving frontend from: ${webDistPath}`);
-      app.use(express.static(webDistPath));
-      
-      // SPA fallback: serve index.html for all non-API routes
-      app.get('*', (_req, res) => {
-        res.sendFile(path.join(webDistPath, 'index.html'));
-      });
-    } else {
-      console.warn('[server] Frontend dist not found, API-only mode');
-    }
+  if (webDistPath) {
+    console.log(`[server] Serving frontend from: ${webDistPath}`);
+    app.use(express.static(webDistPath));
+    
+    // SPA fallback: serve index.html for all non-API routes
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(webDistPath, 'index.html'));
+    });
+  } else {
+    console.warn('[server] Frontend dist not found, API-only mode');
+    console.warn('[server] Run: cd apps/web && npx vite build');
   }
 
   return app;
