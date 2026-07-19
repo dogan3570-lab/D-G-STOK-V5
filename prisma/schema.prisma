@@ -994,3 +994,34 @@ model AICategorySuggestion {
   @@index([confidence])
 }
 
+model AIBrandSuggestion {
+  id              String    @id @default(uuid())
+  productId       String
+  currentBrand    String?
+  suggestedBrand  String?
+  confidence      Float?
+  reason          String?
+  approved        Boolean   @default(false)
+  approvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([productId])
+  @@index([approved])
+}
+
+model AIVariantSuggestion {
+  id             String    @id @default(uuid())
+  productId      String
+  variantType    String    // RENK | BEDEN | NUMARA | BOYUT | MODEL
+  currentValue   String?
+  suggestedValue String?
+  confidence     Float?
+  reason         String?
+  approved       Boolean   @default(false)
+  approvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([productId])
+  @@index([variantType])
+  @@index([approved])
+}

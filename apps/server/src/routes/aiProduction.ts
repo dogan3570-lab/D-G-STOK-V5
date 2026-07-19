@@ -7,6 +7,8 @@ import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddle
 import { prisma } from '../db/prisma.ts';
 import { scanProduct, scanAllProducts, getDashboard } from '../services/aiProduction/scanner.ts';
 import { suggestCategory, scanAllCategories, approveSuggestion, rejectSuggestion } from '../services/aiProduction/categoryEngine.ts';
+import { suggestBrand, scanAllBrands, approveBrand, rejectBrand } from '../services/aiProduction/brandEngine.ts';
+import { suggestVariants, scanAllVariants, approveVariant, rejectVariant } from '../services/aiProduction/variantEngine.ts';
 import { EventBus } from '../services/eventBus/EventBus.ts';
 import { createCorrelationId } from '../services/eventBus/events.ts';
 
@@ -176,6 +178,97 @@ router.post('/category/reject', requireAuth, async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ ok: false, error: error.message });
   }
+});
+
+// ==================== AI BRAND ENGINE ENDPOINT'LERİ ====================
+
+// GET /ai/brand/products - Marka önerileri
+router.get('/brand/products', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit ?? 50)));
+    const where: any = {};
+    if (req.query.status === 'pending') where.approved = false;
+    const [items, total] = await Promise.all([
+      prisma.aIBrandSuggestion.findMany({ where, orderBy: { confidence: 'desc' }, skip: (page - 1) * limit, take: limit }),
+      prisma.aIBrandSuggestion.count({ where }),
+    ]);
+    res.json({ ok: true, items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.get('/brand/:productId', requireAuth, async (req, res) => {
+  try {
+    const result = await suggestBrand(req.params.productId);
+    res.json({ ok: true, ...result });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/brand/scan', requireAuth, requireRole(['ADMIN']), async (_req, res) => {
+  try { const r = await scanAllBrands(); res.json({ ok: true, ...r }); }
+  catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/brand/approve', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    if (!suggestionId) return res.status(400).json({ ok: false, error: 'suggestionId gerekli' });
+    const r = await approveBrand(suggestionId);
+    res.json({ ok: true, ...r });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/brand/reject', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    const r = await rejectBrand(suggestionId);
+    res.json({ ok: true, ...r });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+// ==================== AI VARIANT ENGINE ENDPOINT'LERİ ====================
+
+router.get('/variant/products', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit ?? 50)));
+    const where: any = {};
+    if (req.query.status === 'pending') where.approved = false;
+    const [items, total] = await Promise.all([
+      prisma.aIVariantSuggestion.findMany({ where, orderBy: { confidence: 'desc' }, skip: (page - 1) * limit, take: limit }),
+      prisma.aIVariantSuggestion.count({ where }),
+    ]);
+    res.json({ ok: true, items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.get('/variant/:productId', requireAuth, async (req, res) => {
+  try {
+    const result = await suggestVariants(req.params.productId);
+    res.json({ ok: true, ...result });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/variant/scan', requireAuth, requireRole(['ADMIN']), async (_req, res) => {
+  try { const r = await scanAllVariants(); res.json({ ok: true, ...r }); }
+  catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/variant/approve', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    if (!suggestionId) return res.status(400).json({ ok: false, error: 'suggestionId gerekli' });
+    const r = await approveVariant(suggestionId);
+    res.json({ ok: true, ...r });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
+});
+
+router.post('/variant/reject', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    const r = await rejectVariant(suggestionId);
+    res.json({ ok: true, ...r });
+  } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
 });
 
 export default router;
