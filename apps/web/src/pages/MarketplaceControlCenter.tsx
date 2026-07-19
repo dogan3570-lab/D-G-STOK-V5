@@ -113,6 +113,7 @@ export default function MarketplaceControlCenter() {
     { key: 'stock', label: 'Stok Koruma', icon: '🛡️' },
     { key: 'automation', label: 'Otomasyon', icon: '🤖' },
     { key: 'queue', label: 'İşlem Kuyruğu', icon: '⏳' },
+    { key: 'logs', label: 'Aktivite Log', icon: '📜' },
     { key: 'errors', label: 'Hata Merkezi', icon: '🚨' },
     { key: 'bulk', label: 'Toplu İşlemler', icon: '📋' },
     { key: 'performance', label: 'Performans', icon: '📈' },
@@ -162,6 +163,7 @@ export default function MarketplaceControlCenter() {
           {activeTab === 'stock' && <StockProtectionTab rules={stockRules} onUpdate={setStockRules} criticalItems={criticalStockItems} />}
           {activeTab === 'automation' && <AutomationTab rules={autoRules} onUpdate={setAutoRules} />}
           {activeTab === 'queue' && <QueueTab items={queueItems} />}
+          {activeTab === 'logs' && <ActivityLogTab />}
           {activeTab === 'errors' && <ErrorCenterTab errors={apiErrors} />}
           {activeTab === 'bulk' && <BulkOperationsTab marketplaces={marketplaces} onDone={fetchAll} />}
           {activeTab === 'performance' && <PerformanceTab data={perfData} />}
@@ -503,8 +505,9 @@ function QueueTab({ items }: { items: QueueItem[] }) {
     error: { icon: '❌', color: 'text-red-400' },
   };
 
-  const statuses = ['pending', 'running', 'success', 'error'];
-  const counts = {
+  const statuses = ['pending', 'running', 'success', 'error'] as const;
+  type QueueStatus = (typeof statuses)[number];
+  const counts: Record<QueueStatus, number> = {
     pending: items.filter(i => i.status === 'pending').length,
     running: items.filter(i => i.status === 'running').length,
     success: items.filter(i => i.status === 'success').length,
@@ -722,7 +725,205 @@ function PerformanceTab({ data }: { data: { dailyCalls: number; avgResponse: num
   );
 }
 
-// ==================== BÖLÜM 9: AI DANIŞMAN ====================
+// ==================== BÖLÜM 9: AKTİVİTE LOG ====================
+function ActivityLogTab() {
+  const [logs, setLogs] = useState<Array<{
+    id: string; action: string; entity: string | null; entityId: string | null;
+    details: string | null; meta: string | null; ipAddress: string | null;
+    duration: number | null; success: boolean; createdAt: string;
+    actorUser: { email: string; name: string | null } | null;
+  }>>([]);
+  const [summary, setSummary] = useState<Array<{ action: string; count: number }>>([]);
+  const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, totalPages: 0 });
+  const [loading, setLoading] = useState(true);
+  const [filterAction, setFilterAction] = useState('');
+  const [filterDays, setFilterDays] = useState(7);
+  const [filterSuccess, setFilterSuccess] = useState<string>('all');
+
+  const fetchLogs = useCallback(async (page = 1) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page), limit: '25', days: String(filterDays),
+      });
+      if (filterAction) params.set('action', filterAction);
+      if (filterSuccess !== 'all') params.set('success', filterSuccess);
+
+      const res = await apiFetch<{
+        items: typeof logs; pagination: typeof pagination; summary: typeof summary;
+      }>(`/marketplace/logs?${params}`);
+      if (res.ok && res.data) {
+        setLogs(res.data.items || []);
+        setPagination(res.data.pagination || { page: 1, limit: 25, total: 0, totalPages: 0 });
+        setSummary(res.data.summary || []);
+      }
+    } catch (e) { console.error('Log fetch error:', e); }
+    setLoading(false);
+  }, [filterAction, filterDays, filterSuccess]);
+
+  useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  const actionConfig: Record<string, { icon: string; color: string }> = {
+    CREATE: { icon: '➕', color: 'text-emerald-400' },
+    UPDATE: { icon: '✏️', color: 'text-blue-400' },
+    DELETE: { icon: '🗑️', color: 'text-red-400' },
+    SEND: { icon: '📤', color: 'text-cyan-400' },
+    SYNC: { icon: '🔄', color: 'text-purple-400' },
+    TEST: { icon: '🔌', color: 'text-yellow-400' },
+    IMPORT: { icon: '📥', color: 'text-green-400' },
+    ERROR: { icon: '❌', color: 'text-red-500' },
+    LOGIN: { icon: '🔑', color: 'text-orange-400' },
+    EXPORT: { icon: '📤', color: 'text-indigo-400' },
+  };
+
+  function getActionMeta(action: string): { icon: string; color: string } {
+    for (const [key, val] of Object.entries(actionConfig)) {
+      if (action.toUpperCase().includes(key)) return val;
+    }
+    return { icon: '📋', color: 'text-slate-400' };
+  }
+
+  function parseDetails(details: string | null): string {
+    if (!details) return 'İşlem gerçekleştirildi';
+    try { const p = JSON.parse(details); return p.message || p.description || details; } catch { return details; }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filtreler */}
+      <div className="rounded-xl border border-slate-700 bg-gradient-to-br from-slate-800/80 to-slate-900/80 p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-2xl">📜</span>
+          <div>
+            <h3 className="text-sm font-semibold text-white">Aktivite Logları</h3>
+            <p className="text-xs text-slate-400">Tüm pazaryeri işlem geçmişi</p>
+          </div>
+        </div>
+
+        {/* Aktivite özeti */}
+        {summary.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {summary.map(s => (
+              <span key={s.action} className="rounded-full bg-slate-700/50 px-3 py-1 text-[10px] text-slate-300">
+                {getActionMeta(s.action).icon} {s.action}: <strong>{s.count}</strong>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Filtre çubuğu */}
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={filterAction} onChange={e => setFilterAction(e.target.value)}
+            placeholder="🔍 Aksiyon ara (CREATE, SYNC...)"
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-xs text-white placeholder-slate-500 w-48" />
+          <select value={filterDays} onChange={e => setFilterDays(Number(e.target.value))}
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-xs text-white">
+            <option value={1}>Son 1 gün</option>
+            <option value={3}>Son 3 gün</option>
+            <option value={7}>Son 7 gün</option>
+            <option value={14}>Son 14 gün</option>
+            <option value={30}>Son 30 gün</option>
+          </select>
+          <select value={filterSuccess} onChange={e => setFilterSuccess(e.target.value)}
+            className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-xs text-white">
+            <option value="all">Tümü</option>
+            <option value="true">✅ Başarılı</option>
+            <option value="false">❌ Hatalı</option>
+          </select>
+          <button onClick={() => fetchLogs()}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">
+            🔄 Filtrele
+          </button>
+        </div>
+      </div>
+
+      {/* Log listesi */}
+      <div className="rounded-xl border border-slate-700 bg-gradient-to-br from-slate-800/80 to-slate-900/80 p-4">
+        {loading ? (
+          <div className="text-center py-8 text-slate-400">Yükleniyor...</div>
+        ) : logs.length === 0 ? (
+          <div className="text-center py-8 text-slate-500">Henüz aktivite kaydı bulunmuyor</div>
+        ) : (
+          <div className="space-y-1">
+            {logs.map((log, idx) => {
+              const meta = getActionMeta(log.action);
+              return (
+                <div key={log.id}
+                  className={`flex items-start gap-3 rounded-lg p-3 transition-all hover:bg-slate-700/30 ${
+                    !log.success ? 'bg-red-500/5 border-l-2 border-red-500/30' :
+                    idx % 2 === 0 ? 'bg-slate-800/40' : 'bg-slate-800/20'
+                  }`}>
+                  {/* Zaman çizelgesi noktası */}
+                  <div className="flex flex-col items-center pt-1">
+                    <span className={`text-sm ${meta.color}`}>{meta.icon}</span>
+                    <div className={`w-px h-full min-h-[2rem] ${idx < logs.length - 1 ? 'bg-slate-700' : 'bg-transparent'}`} />
+                  </div>
+                  {/* İçerik */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-medium text-white truncate">
+                          {log.action}
+                          {log.entity && <span className="text-slate-400"> · {log.entity}{log.entityId ? ` #${log.entityId.slice(0, 8)}` : ''}</span>}
+                        </span>
+                        {!log.success && <span className="text-[10px] text-red-400 font-medium">Hata</span>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {log.duration != null && (
+                          <span className="text-[10px] text-slate-500">{log.duration}ms</span>
+                        )}
+                        <span className="text-[10px] text-slate-500">
+                          {fmt(log.createdAt)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">
+                      {parseDetails(log.details)}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      {log.actorUser && (
+                        <span className="text-[10px] text-slate-500">
+                          👤 {log.actorUser.name || log.actorUser.email}
+                        </span>
+                      )}
+                      {log.ipAddress && (
+                        <span className="text-[10px] text-slate-600">🌐 {log.ipAddress}</span>
+                      )}
+                      {log.meta && (
+                        <span className="text-[10px] text-slate-600">📎 meta</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {pagination.totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700">
+            <div className="text-[10px] text-slate-500">
+              Toplam {pagination.total} kayıt · Sayfa {pagination.page}/{pagination.totalPages}
+            </div>
+            <div className="flex gap-1">
+              <button onClick={() => fetchLogs(pagination.page - 1)} disabled={pagination.page <= 1}
+                className="rounded px-3 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30">
+                ◀ Önceki
+              </button>
+              <button onClick={() => fetchLogs(pagination.page + 1)} disabled={pagination.page >= pagination.totalPages}
+                className="rounded px-3 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-30">
+                Sonraki ▶
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== BÖLÜM 10: AI DANIŞMAN ====================
 function AiAdvisorTab() {
   const insights = [
     { type: 'success', title: 'Otomatik Düzeltilen Hatalar', desc: 'Son 24 saatte 12 hata otomatik düzeltildi', icon: '✅' },

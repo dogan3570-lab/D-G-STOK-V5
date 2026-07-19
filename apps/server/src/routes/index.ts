@@ -256,6 +256,54 @@ router.delete('/marketplaces/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR'
   }
 });
 
+// GET /marketplace/logs - Pazaryeri aktivite logları (AuditLog üzerinden)
+router.get('/marketplace/logs', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit ?? 50)));
+    const action = req.query.action ? String(req.query.action) : null;
+    const entity = req.query.entity ? String(req.query.entity) : null;
+    const success = req.query.success !== undefined ? req.query.success === 'true' : null;
+    const days = Math.min(90, Math.max(1, Number(req.query.days ?? 7)));
+
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const where: Record<string, unknown> = {
+      createdAt: { gte: since },
+    };
+    if (action) where.action = { contains: action, mode: 'insensitive' };
+    if (entity) where.entity = entity;
+    if (success !== null) where.success = success;
+
+    const [items, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { actorUser: { select: { email: true, name: true } } },
+      }),
+      prisma.auditLog.count({ where }),
+    ]);
+
+    // Aktivite özeti
+    const summary = await prisma.auditLog.groupBy({
+      by: ['action'],
+      where: { createdAt: { gte: since } },
+      _count: true,
+    });
+
+    return res.json({
+      items,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      summary: summary.map(s => ({ action: s.action, count: s._count })),
+    });
+  } catch (error) {
+    return handleDbError(res, error);
+  }
+});
+
 // Ürün route'ları apps/server/src/routes/products.ts dosyasına taşındı
 
 router.post('/xml/import', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req, res) => {
