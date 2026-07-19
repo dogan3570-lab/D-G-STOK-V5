@@ -222,7 +222,7 @@ function OverviewTab({ marketplaces, onRefresh }: { marketplaces: MarketplaceIte
   const [testingIds, setTestingIds] = useState<Record<string, boolean>>({});
   const [showModal, setShowModal] = useState(false);
   const [editingMp, setEditingMp] = useState<MarketplaceItem | null>(null);
-  const [formData, setFormData] = useState({ name: '', key: '', apiKey: '', apiSecret: '', apiUrl: '' });
+  const [formData, setFormData] = useState({ name: '', key: '', apiKey: '', apiSecret: '', apiUrl: '', merchantId: '', storeId: '' });
 
   const handleTest = async (id: string) => {
     setTestingIds(p => ({ ...p, [id]: true }));
@@ -243,18 +243,65 @@ function OverviewTab({ marketplaces, onRefresh }: { marketplaces: MarketplaceIte
 
   const openEdit = (mp: MarketplaceItem) => {
     setEditingMp(mp);
-    setFormData({ name: mp.name, key: mp.key, apiKey: mp.apiKey || '', apiSecret: '', apiUrl: mp.apiUrl || '' });
+    setFormData({
+      name: mp.name, key: mp.key,
+      apiKey: mp.apiKey || '', apiSecret: '',
+      apiUrl: mp.apiUrl || '',
+      merchantId: mp.merchantId || '',
+      storeId: '' // settings'den çekilebilir
+    });
     setShowModal(true);
   };
 
   const handleSave = async () => {
-    if (!editingMp) return;
-    const res = await apiFetch(`/marketplaces/${editingMp.id}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: formData.name, apiKey: formData.apiKey || undefined, apiSecret: formData.apiSecret || undefined, apiUrl: formData.apiUrl || undefined }),
-    });
-    if (res.ok) { showToast('success', '✅ Güncellendi'); setShowModal(false); onRefresh(); }
-    else showToast('error', res.error?.message || 'Hata');
+    if (editingMp) {
+      // Güncelleme
+      const res = await apiFetch(`/marketplaces/${editingMp.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name,
+          apiKey: formData.apiKey || undefined,
+          apiSecret: formData.apiSecret || undefined,
+          apiUrl: formData.apiUrl || undefined,
+          sellerId: formData.merchantId || undefined,
+        }),
+      });
+      if (res.ok) { showToast('success', '✅ Güncellendi'); setShowModal(false); onRefresh(); }
+      else showToast('error', res.error?.message || 'Hata');
+    } else {
+      // Yeni ekle
+      const res = await apiFetch('/marketplaces', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name, key: formData.key,
+          apiKey: formData.apiKey || undefined,
+          apiSecret: formData.apiSecret || undefined,
+          apiUrl: formData.apiUrl || undefined,
+          sellerId: formData.merchantId || undefined,
+        }),
+      });
+      if (res.ok) { showToast('success', '✅ Eklendi'); setShowModal(false); onRefresh(); }
+      else showToast('error', res.error?.message || 'Hata');
+    }
+  };
+
+  const handleDelete = async (mp: MarketplaceItem) => {
+    if (!confirm(`"${mp.name}" pazaryerini silmek istediğinize emin misiniz?`)) return;
+    const res = await apiFetch(`/marketplaces/${mp.id}`, { method: 'DELETE' });
+    if (res.ok) { showToast('success', `🗑️ ${mp.name} silindi`); onRefresh(); }
+    else showToast('error', res.error?.message || 'Silme başarısız');
+  };
+
+  // Pazaryeri tipine göre etiket ve placeholder
+  const fieldLabels = (key: string) => {
+    const labels: Record<string, Record<string, string>> = {
+      trendyol: { apiKey: 'API Key', apiSecret: 'API Secret', merchantId: 'Satıcı ID (Cari ID)', apiUrl: 'API URL' },
+      hepsiburada: { apiKey: 'Client ID', apiSecret: 'Client Secret', merchantId: 'Mağaza Kodu', apiUrl: 'API URL' },
+      n11: { apiKey: 'App Key', apiSecret: 'App Secret', merchantId: 'Mağaza ID', apiUrl: 'API URL' },
+      amazon: { apiKey: 'Access Key ID', apiSecret: 'Secret Access Key', merchantId: 'Seller ID', apiUrl: 'Marketplace ID' },
+      pazarama: { apiKey: 'API Key', apiSecret: 'API Secret', merchantId: 'Mağaza ID', apiUrl: 'API URL' },
+    };
+    return labels[key] || { apiKey: 'API Key', apiSecret: 'API Secret', merchantId: 'Satıcı ID', apiUrl: 'API URL' };
   };
 
   return (
@@ -340,22 +387,72 @@ function OverviewTab({ marketplaces, onRefresh }: { marketplaces: MarketplaceIte
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-800 p-6">
-            <h3 className="text-base font-semibold text-white mb-4">{editingMp ? 'Pazaryerini Düzenle' : 'Yeni Pazaryeri Ekle'}</h3>
+            <h3 className="text-base font-semibold text-white mb-4">
+              <span className="mr-2">{getLogo(formData.key)}</span>
+              {editingMp ? formData.name || 'Pazaryerini Düzenle' : 'Yeni Pazaryeri Ekle'}
+            </h3>
             <div className="space-y-3">
-              <input value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder="Pazaryeri Adı"
-                className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white" />
-              <input value={formData.key} onChange={e => setFormData(p => ({ ...p, key: e.target.value }))} placeholder="Key (trendyol, n11...)"
-                className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white" />
-              <input value={formData.apiKey} onChange={e => setFormData(p => ({ ...p, apiKey: e.target.value }))} placeholder="API Key"
-                className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white" />
-              <input value={formData.apiSecret} onChange={e => setFormData(p => ({ ...p, apiSecret: e.target.value }))} placeholder="API Secret" type="password"
-                className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white" />
-              <input value={formData.apiUrl} onChange={e => setFormData(p => ({ ...p, apiUrl: e.target.value }))} placeholder="API URL"
-                className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white" />
+              <input value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                placeholder="Pazaryeri Adı (Trendyol, Hepsiburada...)"
+                className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500" />
+              
+              {!editingMp && (
+                <input value={formData.key} onChange={e => setFormData(p => ({ ...p, key: e.target.value.toLowerCase() }))}
+                  placeholder="Key (trendyol, hepsiburada, n11, amazon...)"
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500" />
+              )}
+
+              <div className="border-t border-slate-700 my-2" />
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider">API Bağlantı Bilgileri</p>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-slate-500 mb-1 block">{fieldLabels(formData.key).apiKey}</label>
+                  <input value={formData.apiKey} onChange={e => setFormData(p => ({ ...p, apiKey: e.target.value }))}
+                    placeholder={fieldLabels(formData.key).apiKey}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 mb-1 block">{fieldLabels(formData.key).apiSecret}</label>
+                  <input value={formData.apiSecret} onChange={e => setFormData(p => ({ ...p, apiSecret: e.target.value }))}
+                    placeholder={fieldLabels(formData.key).apiSecret} type="password"
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-slate-500 mb-1 block">{fieldLabels(formData.key).merchantId}</label>
+                  <input value={formData.merchantId} onChange={e => setFormData(p => ({ ...p, merchantId: e.target.value }))}
+                    placeholder={fieldLabels(formData.key).merchantId}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 mb-1 block">{fieldLabels(formData.key).apiUrl}</label>
+                  <input value={formData.apiUrl} onChange={e => setFormData(p => ({ ...p, apiUrl: e.target.value }))}
+                    placeholder={fieldLabels(formData.key).apiUrl}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500" />
+                </div>
+              </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <button onClick={() => setShowModal(false)} className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:bg-slate-700">İptal</button>
-              <button onClick={handleSave} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Kaydet</button>
+
+            <div className="flex justify-between items-center mt-6">
+              <div>
+                {editingMp && (
+                  <button onClick={() => handleDelete(editingMp)}
+                    className="rounded-lg px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors">
+                    🗑️ Sil
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowModal(false)}
+                  className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:bg-slate-700 transition-colors">İptal</button>
+                <button onClick={handleSave}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
+                  {editingMp ? '💾 Kaydet' : '➕ Ekle'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

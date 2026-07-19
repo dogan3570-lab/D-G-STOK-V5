@@ -4,6 +4,7 @@ import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
 import { EventBus } from '../services/eventBus/EventBus.ts';
 import { createCorrelationId } from '../services/eventBus/events.ts';
+import { csrfProtection, criticalOpLimiter, aiLimiter, standardLimiter, readOnlyLimiter } from '../middleware/security.ts';
 import { actionsRouter } from './actions.ts';
 import { fetchXmlFromUrl, importXmlProducts } from '../services/xmlImport.ts';
 import xmlSourcesRoutes from './xmlSources.ts';
@@ -14,15 +15,7 @@ import reportsRoutes from './reports.ts';
 import productsRoutes from './products.ts';
 import brandsRoutes from './brands.ts';
 import brandPoliciesRoutes from './brands-policy.ts';
-import transformRoutes from './transform.ts';
-import titleRoutes from './title.ts';
 import aiRoutes from './ai.ts';
-import plmRoutes from './plm.ts';
-import rulesRoutes from './rules.ts';
-import dqcRoutes from './dqc.ts';
-import twinRoutes from './twin.ts';
-import mdmRoutes from './mdm.ts';
-import pipelineRoutes from './pipeline.ts';
 import listingsRoutes from './listings.ts';
 import contentEngineRouter from './contentEngine.ts';
 import variantsV5Router from './variantsV5.ts';
@@ -34,6 +27,9 @@ import aiCenterRoutes from './aiCenter.ts';
 import aiProductionRoutes from './aiProduction.ts';
 import aiProviderRoutes from './aiProviders.ts';
 import aiCommandCenterRoutes from './aiCommandCenter.ts';
+import { aiImageRouter } from './aiImage.ts';
+import { aiSalesRouter } from './aiSales.ts';
+import { copilotRouter } from './copilot.ts';
 
 export const router = Router();
 
@@ -54,36 +50,64 @@ function handleDbError(res: import('express').Response, error: unknown) {
   });
 }
 
-router.use('/actions', actionsRouter);
-router.use('/xml-sources', xmlSourcesRoutes);
-router.use('/categories', categoriesRoutes);
-router.use('/variants', variantsRoutes);
-router.use('/automation', automationRoutes);
-router.use('/reports', reportsRoutes);
-router.use('/products', productsRoutes);
-router.use('/brands', brandsRoutes);
-router.use('/brand-policies', brandPoliciesRoutes);
-router.use('/transform', transformRoutes);
-router.use('/title', titleRoutes);
-router.use('/ai', aiRoutes);
-router.use('/plm', plmRoutes);
-router.use('/rules', rulesRoutes);
-router.use('/dqc', dqcRoutes);
-router.use('/twin', twinRoutes);
-router.use('/mdm', mdmRoutes);
-router.use('/pipeline', pipelineRoutes);
-router.use('/listings', listingsRoutes);
-router.use('/content', contentEngineRouter);
-router.use('/variants/v5', variantsV5Router);
-router.use('/workflow-state', workflowStateRoutes);
-router.use('/ready-to-send', readyToSendRoutes);
-router.use('/marketplace', marketplaceRoutes);
-router.use('/pricing', pricingRoutes);
-router.use('/ai-center', aiCenterRoutes);
-router.use('/ai', aiProductionRoutes);
-router.use('/ai', aiProviderRoutes);
-router.use('/ai-cc', aiCommandCenterRoutes);
+// ==================== GÜVENLİ KATMANLI ROUTE MİMARİSİ ====================
+// Her route grubu, risk seviyesine göre rate limit ve CSRF koruması alır
 
+// Read-heavy (rahat limit)
+router.use('/reports', readOnlyLimiter, reportsRoutes);
+router.use('/workflow-state', readOnlyLimiter, workflowStateRoutes);
+
+// Standard CRUD
+router.use('/xml-sources', standardLimiter, xmlSourcesRoutes);
+router.use('/categories', standardLimiter, categoriesRoutes);
+router.use('/products', standardLimiter, productsRoutes);
+router.use('/brands', standardLimiter, brandsRoutes);
+router.use('/brand-policies', standardLimiter, brandPoliciesRoutes);
+router.use('/listings', standardLimiter, listingsRoutes);
+router.use('/content', standardLimiter, contentEngineRouter);
+router.use('/variants', standardLimiter, variantsRoutes);
+router.use('/variants/v5', standardLimiter, variantsV5Router);
+router.use('/automation', standardLimiter, automationRoutes);
+router.use('/ready-to-send', standardLimiter, readyToSendRoutes);
+router.use('/pricing', standardLimiter, pricingRoutes);
+
+// Marketplace (kritik - sıkı limit + CSRF)
+router.use('/marketplace', criticalOpLimiter, csrfProtection, marketplaceRoutes);
+router.use('/actions', criticalOpLimiter, csrfProtection, actionsRouter);
+
+// AI (orta limit)
+router.use('/ai-image', aiLimiter, aiImageRouter);
+router.use('/ai-sales', aiLimiter, aiSalesRouter);
+router.use('/ai-cc', aiLimiter, aiCommandCenterRoutes);
+router.use('/copilot', aiLimiter, copilotRouter);
+router.use('/ai', aiLimiter, aiRoutes);
+router.use('/ai', aiLimiter, aiProductionRoutes);
+router.use('/ai', aiLimiter, aiProviderRoutes);
+router.use('/ai-center', aiLimiter, aiCenterRoutes);
+
+
+// ==================== AUDIT LOG: KRİTİK İŞLEMLER ====================
+
+// Login audit
+router.post('/auth/login-audit', requireAuth, async (req: any, res: any) => {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        action: 'LOGIN_SUCCESS',
+        entity: 'User',
+        entityId: req.actor?.userId,
+        details: `User logged in from IP: ${req.ip}`,
+        actorUserId: req.actor?.userId,
+        success: true,
+      },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error) });
+  }
+});
+
+// Admin operations audit
 router.post('/admin/change-password', requireAuth, requireRole(['ADMIN']), async (req, res) => {
   const actor = (req as AuthedRequest).actor;
   const oldPassword = String(req.body?.oldPassword ?? '');
@@ -823,11 +847,19 @@ router.get('/system/health', async (_req, res) => {
   }
 });
 
-// ==================== DASHBOARD STATS ====================
+// ==================== DASHBOARD STATS (Cache'li) ====================
+let dashboardStatsCache: { data: any; timestamp: number } | null = null;
+const DASHBOARD_STATS_CACHE_TTL = 30_000; // 30 saniye
+
 router.get('/dashboard/stats', async (_req, res) => {
   try {
+    // Cache kontrol
+    if (dashboardStatsCache && Date.now() - dashboardStatsCache.timestamp < DASHBOARD_STATS_CACHE_TTL) {
+      return res.json(dashboardStatsCache.data);
+    }
+
     const now = new Date();
-    const todayStart = new Date(now.setHours(0, 0, 0, 0));
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const [totalProducts, totalOrders, totalMarketplaces, totalXmlSources, activeXmlSources, passiveXmlSources, lowStockProducts, errorProducts, todayOrders, xmlSourcesWithError, todayXmlUpdates, readyProducts, brandCount, categoryCount, variantCount] = await Promise.all([
       prisma.product.count(),
       prisma.order.count(),
@@ -846,7 +878,7 @@ router.get('/dashboard/stats', async (_req, res) => {
       prisma.variant.count(),
     ]);
 
-    return res.json({
+    const data = {
       totalProducts,
       totalOrders,
       totalMarketplaces,
@@ -862,7 +894,12 @@ router.get('/dashboard/stats', async (_req, res) => {
       brandCount,
       categoryCount,
       variantCount,
-    });
+    };
+
+    // Cache'e yaz
+    dashboardStatsCache = { data, timestamp: Date.now() };
+
+    return res.json(data);
   } catch (error) {
     return handleDbError(res, error);
   }

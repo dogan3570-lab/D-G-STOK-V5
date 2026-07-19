@@ -5,14 +5,23 @@ import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddle
 
 const router = Router();
 
-// ==================== ÜRÜN İSTATİSTİK ====================
+// ==================== ÜRÜN İSTATİSTİK (Cache'li) ====================
+
+let _productsStatsCache: { data: any; timestamp: number } | null = null;
+const _PRODUCTS_STATS_CACHE_TTL = 30_000; // 30 saniye
 
 // GET /products/stats - Ürün Havuzu KPI istatistikleri
 // NOT: Kategori/Marka/Varyant sayıları, Preparation sekmeleriyle tutarlı olmalıdır.
 router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
   try {
+    // Cache kontrol
+    const cached = _productsStatsCache;
+    if (cached && Date.now() - cached.timestamp < _PRODUCTS_STATS_CACHE_TTL) {
+      return res.json(cached.data);
+    }
+
     const now = new Date();
-    const todayStart = new Date(now.setHours(0, 0, 0, 0));
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const [
       totalProducts,
@@ -61,7 +70,7 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       }),
     ]);
 
-    res.json({
+    const responseData = {
       totalProducts,
       activeProducts,
       passiveProducts,
@@ -71,11 +80,11 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       deletedCount: deletedToday,
       readyForListing: readyProducts,
       missingInfo: totalProducts - readyProducts,
-      pendingCategory,       // Kategori Hazırlama ile tutarlı (categoryId IS NULL)
-      pendingBrand,          // Marka Hazırlama ile tutarlı (brandMatch IS FALSE)
-      pendingVariant,        // Varyant V1 ile tutarlı (variantMatch IS FALSE)
+      pendingCategory,
+      pendingBrand,
+      pendingVariant,
       pendingTemplate: templatePending,
-      variantAnalysisPending, // Varyant Motoru V2 (manuel inceleme + hatalı)
+      variantAnalysisPending,
       missingImages,
       missingBarcode,
       missingDescription,
@@ -83,7 +92,12 @@ router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
       missingStock,
       missingSeo,
       errorProducts,
-    });
+    };
+
+    // Cache'e yaz
+    _productsStatsCache = { data: responseData, timestamp: Date.now() };
+
+    res.json(responseData);
   } catch (error) {
     console.error('Error fetching product stats:', error);
     res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch product stats' } });
@@ -179,24 +193,60 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const sortField = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
     orderBy[sortField] = sortOrder === 'asc' ? 'asc' : 'desc';
 
+    // PERFORMANCE: Sadece gerekli alanları getir (select), ilişkileri lazy yükle
+    const includeVariants = req.query?.includeVariants === 'true';
+    const minimal = req.query?.minimal === 'true';
+    const withPricing = req.query?.withPricing === 'true';
+
     const [items, total] = await Promise.all([
       prisma.product.findMany({
         where,
         orderBy,
         skip,
         take: limit,
-        include: {
+        select: minimal ? {
+          id: true, title: true, sku: true, barcode: true,
+          salePrice: true, purchasePrice: true, stock: true, status: true,
+          images: true, xmlKey: true, vatRate: true, profitMargin: true,
+          categoryId: true, brandId: true,
+          categoryMatch: true, brandMatch: true, variantMatch: true, templateMatch: true,
+          createdAt: true, updatedAt: true,
           category: { select: { id: true, name: true } },
           brand: { select: { id: true, name: true } },
-          variants: { select: { id: true, name: true, value: true } },
           xmlSource: { select: { id: true, name: true, company: true } },
+          ...(includeVariants ? { variants: { select: { id: true, name: true, value: true } } } : {}),
+        } : {
+          id: true, title: true, sku: true, barcode: true, xmlKey: true,
+          salePrice: true, purchasePrice: true, stock: true, status: true,
+          images: true, description: true, seoTitle: true, seoDescription: true,
+          vatRate: true, commissionRate: true, profitMargin: true, discount: true,
+          categoryId: true, brandId: true, xmlSourceId: true,
+          categoryMatch: true, brandMatch: true, variantMatch: true, templateMatch: true,
+          unit: true, currency: true, tags: true, errorMessage: true,
+          createdAt: true, updatedAt: true,
+          category: { select: { id: true, name: true } },
+          brand: { select: { id: true, name: true } },
+          xmlSource: { select: { id: true, name: true, company: true } },
+          ...(includeVariants ? { variants: { select: { id: true, name: true, value: true } } } : {}),
         },
       }),
       prisma.product.count({ where }),
     ]);
 
+    // Fiyat hesaplama: purchasePrice yoksa salePrice baz al, varsa hesapla
+    const itemsWithPricing = items.map(item => {
+      const basePrice = item.purchasePrice || item.salePrice || 0;
+      const vat = item.vatRate || 20;
+      const margin = item.profitMargin || 30;
+      const vatAmount = basePrice * (vat / 100);
+      const totalCost = basePrice + vatAmount;
+      const profitAmount = totalCost * (margin / 100);
+      const calculatedPrice = Math.max(Math.ceil((totalCost + profitAmount) / 100) * 100 - 1, basePrice * 1.05);
+      return { ...item, calculatedPrice };
+    });
+
     res.json({
-      items,
+      items: itemsWithPricing,
       pagination: {
         page,
         limit,

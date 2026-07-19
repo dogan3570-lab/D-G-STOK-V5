@@ -42,7 +42,7 @@ router.post('/scan/:productId', requireAuth, async (req, res) => {
 
 // POST /api/ai-cc/resolve/:issueId - Issue çöz
 router.post('/resolve/:issueId', requireAuth, async (req, res) => {
-  try { const result = await AICommandCenter.resolveIssue(req.params.issueId); res.json({ ok: true, ...result }); }
+  try { const result = await AICommandCenter.resolveIssue(req.params.issueId); res.json({ ...result, ok: result.ok ?? true }); }
   catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
 });
 

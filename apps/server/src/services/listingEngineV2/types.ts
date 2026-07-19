@@ -21,7 +21,7 @@ export interface PriceCalculation {
   roundedPrice: number;
   rounding: string;
   rule: PriceRule | null;
-  ruleType: 'PRODUCT' | 'CATEGORY' | 'GENERAL' | 'NONE';
+  ruleType: string;
 }
 
 export interface ListingResult {

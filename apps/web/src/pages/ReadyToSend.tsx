@@ -8,6 +8,8 @@ interface Product {
   id: string; title: string | null; xmlKey: string;
   sku: string | null; barcode: string | null; stock: number;
   salePrice: number | null; purchasePrice: number | null;
+  vatRate: number | null; profitMargin: number | null;
+  calculatedPrice?: number | null;
   categoryMatch: boolean; brandMatch: boolean; variantMatch: boolean; templateMatch: boolean;
   category?: { id: string; name: string } | null;
   brand?: { id: string; name: string } | null;
@@ -179,12 +181,16 @@ export default function ReadyToSend() {
       {/* Tablo */}
       <div className="rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden">
         <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 400px)' }}>
-          <table className="w-full min-w-[900px]">
+          <table className="w-full min-w-[1200px]">
             <thead className="bg-slate-700/80 sticky top-0 z-10">
               <tr>
                 <th className="px-3 py-3 w-10"><input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="rounded border-slate-600 bg-slate-700 text-blue-600" /></th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Ürün</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">XML Kaynak</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">SKU/Barkod</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold text-orange-400">XML Alış (KDV Dahil)</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold text-blue-400">Kullanıcı Liste Fiyatı</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold text-green-400">Hesaplanan Liste Fiyatı</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold text-slate-400">Stok</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Kategori</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Marka</th>
                 <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Varyant</th>
@@ -194,19 +200,39 @@ export default function ReadyToSend() {
             </thead>
             <tbody className="divide-y divide-slate-700/50">
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-12"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mx-auto" /></td></tr>
+                <tr><td colSpan={12} className="text-center py-12"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mx-auto" /></td></tr>
               ) : products.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-12 text-sm text-slate-500">✅ Tüm ürünler gönderilmiş veya henüz hazır değil</td></tr>
+                <tr><td colSpan={12} className="text-center py-12 text-sm text-slate-500">✅ Tüm ürünler gönderilmiş veya henüz hazır değil</td></tr>
               ) : products.map(p => {
                 const stage = getStage(p);
+                const kdv = p.salePrice && p.purchasePrice ? ((p.salePrice - p.purchasePrice) / p.purchasePrice * 100).toFixed(1) : null;
                 return (
                   <tr key={p.id} className={`transition-colors ${selectedIds.has(p.id) ? 'bg-blue-900/20' : 'hover:bg-slate-700/30'}`}>
                     <td className="px-3 py-2.5"><input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="rounded border-slate-600 bg-slate-700 text-blue-600" /></td>
                     <td className="px-3 py-2.5">
-                      <div className="text-sm font-medium text-white truncate max-w-[200px]" title={p.title || p.xmlKey}>{p.title || p.xmlKey}</div>
-                      <div className="text-[10px] text-slate-500">{p.sku || p.xmlKey}</div>
+                      <div className="text-sm font-medium text-white truncate max-w-[180px]" title={p.title || p.xmlKey}>{p.title || p.xmlKey}</div>
+                      <div className="text-[10px] text-slate-500">{p.xmlSource?.name || '-'}</div>
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-slate-400">{p.xmlSource?.name || '-'}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="text-xs text-slate-300">{p.sku || '-'}</div>
+                      <div className="text-[10px] text-slate-500">{p.barcode || '-'}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="text-sm font-semibold text-orange-400">{p.purchasePrice ? `₺${p.purchasePrice.toFixed(2)}` : '-'}</div>
+                      {p.purchasePrice && <div className="text-[10px] text-slate-500">KDV: %{p.vatRate || 20}</div>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="text-sm font-semibold text-blue-400">{p.salePrice ? `₺${p.salePrice.toFixed(2)}` : '-'}</div>
+                      {p.salePrice && !p.purchasePrice && <div className="text-[10px] text-yellow-400">Baz alınacak</div>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <div className="text-sm font-semibold text-green-400">{p.calculatedPrice ? `₺${p.calculatedPrice.toFixed(2)}` : '-'}</div>
+                      {p.calculatedPrice && p.purchasePrice && <div className="text-[10px] text-slate-500">%{(((p.calculatedPrice - p.purchasePrice) / p.purchasePrice) * 100).toFixed(1)} kar</div>}
+                      {!p.purchasePrice && p.salePrice && <div className="text-[10px] text-slate-500">Kullanıcı fiyatı baz</div>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <span className={`text-sm font-bold ${(p.stock ?? 0) <= 0 ? 'text-red-400' : (p.stock ?? 0) < 10 ? 'text-yellow-400' : 'text-white'}`}>{p.stock ?? 0}</span>
+                    </td>
                     <td className="px-3 py-2.5 text-xs">{p.categoryMatch ? '✅' : '❌'}</td>
                     <td className="px-3 py-2.5 text-xs">{p.brandMatch ? '✅' : '❌'}</td>
                     <td className="px-3 py-2.5 text-xs">{p.variantMatch ? '✅' : '⏳'}</td>

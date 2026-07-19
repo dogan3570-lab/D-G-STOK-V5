@@ -13,10 +13,13 @@ import Orders from './pages/Orders';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import VariantExceptionScreen from './pages/VariantExceptionScreen';
+import AIImageCenter from './pages/AIImageCenter';
+import AISalesCenter from './pages/AISalesCenter';
+import AICopilot from './pages/AICopilot';
 import { useTheme } from './hooks/useTheme';
 import './styles/theme.css';
 
-type PageKey = 'kontrol' | 'xml' | 'urunhavuzu' | 'urunhazirlama' | 'gonderimehazir' | 'pazaryeri' | 'siparis' | 'rapor' | 'ayar' | 'varyant';
+type PageKey = 'kontrol' | 'xml' | 'urunhavuzu' | 'urunhazirlama' | 'gonderimehazir' | 'pazaryeri' | 'siparis' | 'rapor' | 'ayar' | 'varyant' | 'ai-image' | 'ai-sales' | 'copilot';
 
 const MENU_ITEMS: Array<{ key: PageKey; label: string; icon: string }> = [
   { key: 'kontrol', label: 'Kontrol Paneli', icon: '📊' },
@@ -25,6 +28,9 @@ const MENU_ITEMS: Array<{ key: PageKey; label: string; icon: string }> = [
   { key: 'urunhazirlama', label: 'Ürün Hazırlama', icon: '⚙️' },
   { key: 'gonderimehazir', label: 'Gönderime Hazır', icon: '✅' },
   { key: 'varyant', label: 'Varyant İstisnaları', icon: '🔀' },
+  { key: 'ai-image', label: 'AI Görsel Merkezi', icon: '🖼️' },
+  { key: 'ai-sales', label: 'AI Satış Asistanı', icon: '💰' },
+  { key: 'copilot', label: 'AI Copilot', icon: '🤖' },
   { key: 'pazaryeri', label: 'Pazaryeri Yönetimi', icon: '🛒' },
   { key: 'siparis', label: 'Siparişler', icon: '📑' },
   { key: 'rapor', label: 'Raporlar', icon: '📊' },
@@ -55,6 +61,9 @@ export default function App() {
       urunhazirlama: 'Ürün Hazırlama',
       gonderimehazir: 'Gönderime Hazır',
       varyant: 'Varyant İstisna Yönetimi',
+      'ai-image': 'AI Görsel Kalite Merkezi',
+      'ai-sales': 'AI Satış ve Karlılık Asistanı',
+      copilot: 'AI Copilot',
       pazaryeri: 'Pazaryeri Yönetimi',
       siparis: 'Siparişler',
       rapor: 'Raporlar',
@@ -77,6 +86,12 @@ export default function App() {
         return <ReadyToSend />;
       case 'varyant':
         return <VariantExceptionScreen />;
+      case 'ai-image':
+        return <AIImageCenter />;
+      case 'ai-sales':
+        return <AISalesCenter />;
+      case 'copilot':
+        return <AICopilot />;
       case 'pazaryeri':
         return <MarketplaceControlCenter />;
       case 'siparis':

@@ -223,7 +223,7 @@ export function calculatePriceV5(
     minPrice,
     maxPrice,
     rule: rule as any,
-    ruleType: rule.ruleType || 'GENERAL',
+    ruleType: (rule as any).ruleType || 'GENERAL',
   };
 }
 
@@ -290,8 +290,6 @@ export function previewPriceV5(
     maxPrice: 999999,
     active: true,
     priority: 0,
-    createdAt: new Date(),
-    updatedAt: new Date(),
     ...extraOptions,
   });
 }

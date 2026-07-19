@@ -5,6 +5,8 @@
 import { Router } from 'express';
 import { prisma } from '../db/prisma.ts';
 import { requireAuth, requireRole } from '../auth/authMiddleware.ts';
+import { EventBus } from '../services/eventBus/EventBus.ts';
+import { createCorrelationId } from '../services/eventBus/events.ts';
 import {
   runV5Pipeline,
   decideProductById,
@@ -23,6 +25,27 @@ router.post('/run', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req:
   try {
     const { xmlSourceId } = req.body;
     const result = await runV5Pipeline(xmlSourceId || undefined);
+
+    // Pipeline sonrası Workflow cascade'ini tetikle
+    const matchedProductIds = result.decisions
+      .filter(d => d.status === 'AUTO_APPROVED' || d.status === 'AUTO_CREATED')
+      .map(d => d.productId);
+    if (matchedProductIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: {
+          productIds: matchedProductIds,
+          productCount: matchedProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'auto',
+        },
+      });
+    }
+
     return res.json({ ok: true, ...result });
   } catch (error) {
     console.error('[V5] Pipeline error:', error);
@@ -34,6 +57,27 @@ router.post('/run', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req:
 router.post('/run/:xmlSourceId', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req: any, res: any) => {
   try {
     const result = await runV5Pipeline(req.params.xmlSourceId);
+
+    // Pipeline sonrası Workflow cascade'ini tetikle
+    const matchedProductIds = result.decisions
+      .filter(d => d.status === 'AUTO_APPROVED' || d.status === 'AUTO_CREATED')
+      .map(d => d.productId);
+    if (matchedProductIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: {
+          productIds: matchedProductIds,
+          productCount: matchedProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'auto',
+        },
+      });
+    }
+
     return res.json({ ok: true, ...result });
   } catch (error) {
     console.error('[V5] Pipeline error:', error);
@@ -277,6 +321,16 @@ router.post('/', requireAuth, async (req: any, res: any) => {
       },
     });
 
+    if (productId) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: { productIds: [productId], productCount: 1, oldValue: false, newValue: true, source: 'manual' },
+      });
+    }
+
     return res.status(201).json({ item });
   } catch (error: any) {
     if (error?.code === 'P2002') {
@@ -384,6 +438,16 @@ router.post('/batch', requireAuth, async (req: any, res: any) => {
       },
     });
 
+    if (created > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: { productIds, productCount: productIds.length, oldValue: false, newValue: true, source: 'auto' },
+      });
+    }
+
     return res.json({
       created,
       skipped: productIds.length - created,
@@ -450,6 +514,16 @@ router.post('/bulk-match', requireAuth, async (req: any, res: any) => {
         actorUserId: req.actor?.userId || null,
       },
     });
+
+    if (uniqueProductIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: { productIds: uniqueProductIds, productCount: uniqueProductIds.length, oldValue: false, newValue: true, source: 'manual' },
+      });
+    }
 
     return res.json({
       totalCreated,
@@ -551,6 +625,16 @@ router.post('/auto-detect', requireAuth, async (req: any, res: any) => {
         actorUserId: req.actor?.userId || null,
       },
     });
+
+    if (matchedProductIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: { productIds: matchedProductIds, productCount: matchedProductIds.length, oldValue: false, newValue: true, source: 'auto' },
+      });
+    }
 
     return res.json({
       totalDetected: totalCreated,
@@ -817,6 +901,27 @@ router.post('/scan', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req
   try {
     const { xmlSourceId, marketplaceKey } = req.body;
     const result = await runV5Pipeline(xmlSourceId || undefined);
+
+    // Pipeline sonrası Workflow cascade'ini tetikle
+    const matchedProductIds = result.decisions
+      .filter(d => d.status === 'AUTO_APPROVED' || d.status === 'AUTO_CREATED')
+      .map(d => d.productId);
+    if (matchedProductIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: {
+          productIds: matchedProductIds,
+          productCount: matchedProductIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'auto',
+        },
+      });
+    }
+
     return res.json({ ok: true, ...result });
   } catch (error) {
     console.error('[V5] POST /variants/scan error:', error);
@@ -873,7 +978,7 @@ router.post('/confirm-match', requireAuth, async (req: any, res: any) => {
       return res.status(400).json({ ok: false, error: 'matches array gerekli' });
     }
 
-    let totalUpdated = 0;
+    const updatedIds: string[] = [];
     for (const match of matches) {
       const { productId } = match;
       if (!productId) continue;
@@ -882,19 +987,36 @@ router.post('/confirm-match', requireAuth, async (req: any, res: any) => {
         where: { id: productId },
         data: { variantMatch: true },
       });
-      totalUpdated++;
+      updatedIds.push(productId);
     }
 
     await prisma.auditLog.create({
       data: {
         action: 'V5_CONFIRM_MATCH',
         entity: 'variant',
-        details: `V5 otomatik eşleştirme onayı: ${totalUpdated} ürün`,
+        details: `V5 otomatik eşleştirme onayı: ${updatedIds.length} ürün`,
         actorUserId: req.actor?.userId || null,
       },
     });
 
-    return res.json({ ok: true, totalUpdated });
+    // Workflow cascade'ini tetikle
+    if (updatedIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: {
+          productIds: updatedIds,
+          productCount: updatedIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'manual',
+        },
+      });
+    }
+
+    return res.json({ ok: true, totalUpdated: updatedIds.length });
   } catch (error) {
     console.error('[V5] POST /variants/confirm-match error:', error);
     return res.status(500).json({ ok: false, error: 'Onaylama başarısız' });
@@ -909,7 +1031,7 @@ router.post('/manual-match', requireAuth, async (req: any, res: any) => {
       return res.status(400).json({ ok: false, error: 'matches array gerekli' });
     }
 
-    let totalUpdated = 0;
+    const allUpdatedIds: string[] = [];
     for (const match of matches) {
       const { productIds } = match;
       if (!Array.isArray(productIds)) continue;
@@ -918,19 +1040,36 @@ router.post('/manual-match', requireAuth, async (req: any, res: any) => {
         where: { id: { in: productIds } },
         data: { variantMatch: true },
       });
-      totalUpdated += productIds.length;
+      allUpdatedIds.push(...productIds);
     }
 
     await prisma.auditLog.create({
       data: {
         action: 'V5_MANUAL_MATCH',
         entity: 'variant',
-        details: `V5 manuel eşleştirme: ${totalUpdated} ürün`,
+        details: `V5 manuel eşleştirme: ${allUpdatedIds.length} ürün`,
         actorUserId: req.actor?.userId || null,
       },
     });
 
-    return res.json({ ok: true, totalUpdated });
+    // Workflow cascade'ini tetikle
+    if (allUpdatedIds.length > 0) {
+      EventBus.emit({
+        type: 'VariantMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'VariantEngineV5',
+        data: {
+          productIds: allUpdatedIds,
+          productCount: allUpdatedIds.length,
+          oldValue: false,
+          newValue: true,
+          source: 'manual',
+        },
+      });
+    }
+
+    return res.json({ ok: true, totalUpdated: allUpdatedIds.length });
   } catch (error) {
     console.error('[V5] POST /variants/manual-match error:', error);
     return res.status(500).json({ ok: false, error: 'Manuel eşleştirme başarısız' });
@@ -956,6 +1095,21 @@ router.post('/approve', requireAuth, async (req: any, res: any) => {
         entity: 'variant',
         details: `V5 onay: ${productIds.length} ürün, grup: ${groupId || 'yok'}, parent: ${parentSku || 'yok'}`,
         actorUserId: req.actor?.userId || null,
+      },
+    });
+
+    // Workflow cascade'ini tetikle
+    EventBus.emit({
+      type: 'VariantMatchChanged',
+      correlationId: createCorrelationId('WF'),
+      timestamp: new Date().toISOString(),
+      source: 'VariantEngineV5',
+      data: {
+        productIds,
+        productCount: productIds.length,
+        oldValue: false,
+        newValue: true,
+        source: 'manual',
       },
     });
 

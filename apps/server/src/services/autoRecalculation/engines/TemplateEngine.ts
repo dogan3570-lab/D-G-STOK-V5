@@ -4,6 +4,8 @@
 // =======================================================
 
 import { prisma } from '../../../db/prisma.ts';
+import { EventBus } from '../../eventBus/EventBus.ts';
+import { createCorrelationId } from '../../eventBus/events.ts';
 
 export class TemplateEngine {
   /**
@@ -27,6 +29,22 @@ export class TemplateEngine {
         where: { id: productId },
         data: { templateMatch: shouldBeTrue },
       });
+
+      // TemplateMatchChanged event'ini emit et -> Workflow cascade'ini tetikle
+      EventBus.emit({
+        type: 'TemplateMatchChanged',
+        correlationId: createCorrelationId('WF'),
+        timestamp: new Date().toISOString(),
+        source: 'TemplateEngine',
+        data: {
+          productIds: [productId],
+          productCount: 1,
+          oldValue: !shouldBeTrue,
+          newValue: shouldBeTrue,
+          source: 'auto',
+        },
+      });
+
       return { changed: true, templateMatch: shouldBeTrue };
     }
 

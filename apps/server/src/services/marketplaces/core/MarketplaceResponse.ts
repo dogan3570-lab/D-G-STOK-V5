@@ -27,6 +27,11 @@ export interface MarketplaceResponse<T = any> {
   raw?: any;
 }
 
+/** N11Adapter uyumluluğu için success alias */
+export function isOk(response: MarketplaceResponse): boolean {
+  return response.success;
+}
+
 /** Hata bilgisi */
 export interface MarketplaceErrorInfo {
   code: string;

@@ -14,8 +14,8 @@ const WEIGHTS: Record<string, number> = {
 const STATUS_ORDER = ['OK', 'WARNING', 'ERROR', 'PENDING'] as const;
 type CheckStatus = (typeof STATUS_ORDER)[number];
 
-function getStatus(value: boolean | number | null | undefined, threshold?: number): CheckStatus {
-  if (value === true || (typeof value === 'number' && value > 0)) return 'OK';
+function getStatus(value: boolean | number | string | null | undefined, threshold?: number): CheckStatus {
+  if (value === true || value === 'OK' || (typeof value === 'number' && value > 0) || (typeof value === 'string' && value.length > 0)) return 'OK';
   if (value === false || (typeof value === 'number' && value === 0)) return 'ERROR';
   return 'PENDING';
 }

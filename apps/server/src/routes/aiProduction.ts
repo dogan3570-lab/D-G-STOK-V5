@@ -175,7 +175,7 @@ router.post('/category/reject', requireAuth, async (req, res) => {
     const { suggestionId } = req.body;
     if (!suggestionId) return res.status(400).json({ ok: false, error: 'suggestionId gerekli' });
     const result = await rejectSuggestion(suggestionId);
-    res.json({ ok: true, ...result });
+    res.json({ ...result, ok: result.ok ?? true });
   } catch (error: any) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -223,7 +223,7 @@ router.post('/brand/reject', requireAuth, async (req, res) => {
   try {
     const { suggestionId } = req.body;
     const r = await rejectBrand(suggestionId);
-    res.json({ ok: true, ...r });
+    res.json({ ...r, ok: r.ok ?? true });
   } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
 });
 
@@ -268,7 +268,7 @@ router.post('/variant/reject', requireAuth, async (req, res) => {
   try {
     const { suggestionId } = req.body;
     const r = await rejectVariant(suggestionId);
-    res.json({ ok: true, ...r });
+    res.json({ ...r, ok: r.ok ?? true });
   } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
 });
 
@@ -313,7 +313,7 @@ router.post('/content/reject', requireAuth, async (req, res) => {
   try {
     const { suggestionId } = req.body;
     const r = await rejectContent(suggestionId);
-    res.json({ ok: true, ...r });
+    res.json({ ...r, ok: r.ok ?? true });
   } catch (error: any) { res.status(500).json({ ok: false, error: error.message }); }
 });
 

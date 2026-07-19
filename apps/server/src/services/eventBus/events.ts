@@ -18,7 +18,7 @@ export type CorrelationId = string;
  * Correlation ID oluşturucu
  */
 let counter = 0;
-export function createCorrelationId(prefix: 'SP' | 'XML' | 'MP' | 'API' | 'BATCH' | 'WF' = 'SP'): CorrelationId {
+export function createCorrelationId(prefix: 'SP' | 'XML' | 'MP' | 'API' | 'BATCH' | 'WF' | 'AI' = 'SP'): CorrelationId {
   counter++;
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
@@ -221,22 +221,6 @@ export interface TemplateMatchChangedEvent extends BaseEvent {
 }
 
 /**
- * AutoRecalculationEngine tetiklendiğinde yayınlanır.
- * Dashboard ve UI güncellemeleri bu event'i dinler.
- */
-export interface RecalculationTriggeredEvent extends BaseEvent {
-  type: 'RecalculationTriggered';
-  data: {
-    productId: string;
-    trigger: string;
-    steps: Array<{ name: string; durationMs: number; changed: boolean }>;
-    totalDurationMs: number;
-    result: 'SUCCESS' | 'FAILED';
-    readiness: number;
-  };
-}
-
-/**
  * Dashboard güncellenmesi gerektiğinde tetiklenir.
  * Tüm ekranlar aynı veriyi göstermesi için cache temizlenir.
  */
@@ -266,6 +250,182 @@ export interface ProductImportCompletedEvent extends BaseEvent {
   };
 }
 
+// ==================== AI IMAGE QUALITY CENTER EVENT'LERİ ====================
+
+/**
+ * Görsel analizi tamamlandığında tetiklenir.
+ */
+export interface ImageAnalyzedEvent extends BaseEvent {
+  type: 'ImageAnalyzed';
+  data: {
+    productId?: string;
+    imageUrl?: string;
+    overallScore?: number;
+    status?: string;
+    issueCount?: number;
+    analysisId?: string;
+    productIds?: string[];
+    totalCount?: number;
+    batchAnalysis?: boolean;
+    totalProcessed?: number;
+    successful?: number;
+    failed?: number;
+    results?: Array<{
+      productId: string;
+      imageUrl: string;
+      score: number;
+      status: string;
+    }>;
+    batchCompleted?: boolean;
+  };
+}
+
+/**
+ * Görselde sorun tespit edildiğinde tetiklenir.
+ */
+export interface ImageIssueDetectedEvent extends BaseEvent {
+  type: 'ImageIssueDetected';
+  data: {
+    productId: string;
+    imageUrl?: string;
+    analysisId?: string;
+    issues: Array<{
+      issueType: string;
+      severity: string;
+      confidence: number;
+      description: string;
+    }>;
+    overallScore: number;
+  };
+}
+
+/**
+ * Görsel sorunu onaylandığında tetiklenir.
+ */
+export interface ImageApprovedEvent extends BaseEvent {
+  type: 'ImageApproved';
+  data: {
+    issueId: string;
+    issueType: string;
+    severity: string;
+    approved: boolean;
+  };
+}
+
+/**
+ * Görsel reddedildiğinde tetiklenir.
+ */
+export interface ImageRejectedEvent extends BaseEvent {
+  type: 'ImageRejected';
+  data: {
+    issueId: string;
+    issueType: string;
+    severity: string;
+    approved: boolean;
+  };
+}
+
+// ==================== AI SALES ADVISOR EVENT'LERİ ====================
+
+export interface PriceRecommendationCreatedEvent extends BaseEvent {
+  type: 'PriceRecommendationCreated';
+  data: {
+    productId: string;
+    marketplace?: string;
+    currentPrice: number;
+    recommendedPrice: number;
+    recommendation: string;
+    confidence: number;
+    reportId?: string;
+  };
+}
+
+export interface PriceRecommendationApprovedEvent extends BaseEvent {
+  type: 'PriceRecommendationApproved';
+  data: {
+    reportId: string;
+    productId: string;
+    marketplace?: string;
+    oldPrice: number;
+    newPrice: number;
+    approved: boolean;
+  };
+}
+
+export interface PriceRecommendationRejectedEvent extends BaseEvent {
+  type: 'PriceRecommendationRejected';
+  data: {
+    reportId: string;
+    productId: string;
+    marketplace?: string;
+    oldPrice: number;
+    newPrice: number;
+    approved: boolean;
+  };
+}
+
+export interface ProfitChangedEvent extends BaseEvent {
+  type: 'ProfitChanged';
+  data: {
+    productId: string;
+    marketplace?: string;
+    oldPrice: number;
+    newPrice: number;
+    oldProfit: number;
+    newProfit: number;
+    reason: string;
+  };
+}
+
+export interface CompetitionChangedEvent extends BaseEvent {
+  type: 'CompetitionChanged';
+  data: {
+    productId: string;
+    marketplace?: string;
+    oldCompetitionLevel: number;
+    newCompetitionLevel: number;
+  };
+}
+
+// ==================== AI COPILOT EVENT'LERİ ====================
+
+export interface CopilotRequestedEvent extends BaseEvent {
+  type: 'CopilotRequested';
+  data: {
+    question: string;
+    userId?: string;
+  };
+}
+
+export interface CopilotTaskStartedEvent extends BaseEvent {
+  type: 'CopilotTaskStarted';
+  data: {
+    taskId: string;
+    module: string;
+    action: string;
+  };
+}
+
+export interface CopilotTaskCompletedEvent extends BaseEvent {
+  type: 'CopilotTaskCompleted';
+  data: {
+    taskId: string;
+    module: string;
+    action: string;
+    success: boolean;
+  };
+}
+
+export interface CopilotTaskFailedEvent extends BaseEvent {
+  type: 'CopilotTaskFailed';
+  data: {
+    taskId: string;
+    module: string;
+    action: string;
+    error: string;
+  };
+}
+
 // ==================== BİRLEŞİK EVENT TİPİ ====================
 
 export type AppEvent =
@@ -279,9 +439,21 @@ export type AppEvent =
   | BrandMatchChangedEvent
   | VariantMatchChangedEvent
   | TemplateMatchChangedEvent
-  | RecalculationTriggeredEvent
   | DashboardRefreshEvent
-  | ProductImportCompletedEvent;
+  | ProductImportCompletedEvent
+  | ImageAnalyzedEvent
+  | ImageIssueDetectedEvent
+  | ImageApprovedEvent
+  | ImageRejectedEvent
+  | PriceRecommendationCreatedEvent
+  | PriceRecommendationApprovedEvent
+  | PriceRecommendationRejectedEvent
+  | ProfitChangedEvent
+  | CompetitionChangedEvent
+  | CopilotRequestedEvent
+  | CopilotTaskStartedEvent
+  | CopilotTaskCompletedEvent
+  | CopilotTaskFailedEvent;
 
 // ==================== EVENT HANDLER TİPİ ====================
 

@@ -312,6 +312,129 @@ export function registerWorkflowEventListeners(): void {
     }
   });
 
+  // ==================== AI IMAGE EVENT LISTENER'LARI ====================
+  EventBus.on('ImageAnalyzed', async (event: any) => {
+    const { productId, totalImages, passCount, failCount, score } = event.data;
+    await prisma.auditLog.create({
+      data: {
+        action: 'AI_IMAGE_ANALYZED',
+        entity: 'Product',
+        entityId: productId,
+        details: JSON.stringify({ totalImages, passCount, failCount, score }),
+        success: true,
+      },
+    });
+    SummaryService.clearCache();
+    DashboardService.clearCache();
+  });
+
+  EventBus.on('ImageIssueDetected', async (event: any) => {
+    const { productId, issues } = event.data;
+    // AI Command Center'a issue olarak ekle
+    await prisma.aIIssue.create({
+      data: { productId, severity: 'HIGH', description: JSON.stringify(issues || []) },
+    });
+    SummaryService.clearCache();
+  });
+
+  EventBus.on('ImageApproved', async (event: any) => {
+    await prisma.auditLog.create({
+      data: { action: 'AI_IMAGE_APPROVED', entity: 'Product', entityId: event.data.productId, success: true },
+    });
+    SummaryService.clearCache();
+  });
+
+  EventBus.on('ImageRejected', async (event: any) => {
+    await prisma.auditLog.create({
+      data: { action: 'AI_IMAGE_REJECTED', entity: 'Product', entityId: event.data.productId, success: false },
+    });
+    SummaryService.clearCache();
+  });
+
+  // ==================== AI SALES EVENT LISTENER'LARI ====================
+  EventBus.on('PriceRecommendationCreated', async (event: any) => {
+    SummaryService.clearCache();
+    DashboardService.clearCache();
+    await prisma.auditLog.create({
+      data: { action: 'AI_PRICE_RECOMMENDATION', entity: 'Product', entityId: event.data.productId, success: true },
+    });
+  });
+
+  EventBus.on('PriceRecommendationApproved', async (event: any) => {
+    SummaryService.clearCache();
+    await WorkflowStateManager.syncFromProduct(event.data.productId);
+  });
+
+  EventBus.on('PriceRecommendationRejected', async (event: any) => {
+    await prisma.auditLog.create({
+      data: { action: 'AI_PRICE_REJECTED', entity: 'Product', entityId: event.data.productId, success: false },
+    });
+  });
+
+  EventBus.on('ProfitChanged', async (event: any) => {
+    SummaryService.clearCache();
+    DashboardService.clearCache();
+    // WorkflowState'de price adımını güncelle
+    await WorkflowStateManager.syncFromProduct(event.data.productId);
+  });
+
+  // ==================== AI COPILOT EVENT LISTENER'LARI ====================
+  EventBus.on('CopilotRequested', async (event: any) => {
+    await prisma.auditLog.create({
+      data: {
+        action: 'COPILOT_REQUEST',
+        entity: 'Copilot',
+        details: `Sorgu: ${event.data?.query?.substring(0, 100)}`,
+        success: true,
+      },
+    });
+  });
+
+  EventBus.on('CopilotTaskStarted', async (event: any) => {
+    await WorkflowStateManager.recordTimeline(
+      event.data.productId || 'system',
+      `Copilot görevi başladı: ${event.data.taskType}`,
+      { taskId: event.data.taskId }
+    );
+  });
+
+  EventBus.on('CopilotTaskCompleted', async (event: any) => {
+    SummaryService.clearCache();
+    DashboardService.clearCache();
+    await prisma.auditLog.create({
+      data: { action: 'COPILOT_COMPLETED', entity: 'Copilot', details: event.data.result, success: true },
+    });
+  });
+
+  EventBus.on('CopilotTaskFailed', async (event: any) => {
+    await prisma.auditLog.create({
+      data: { action: 'COPILOT_FAILED', entity: 'Copilot', details: event.data.error, success: false },
+    });
+    // AI Command Center'a issue olarak ekle
+    if (event.data.productId) {
+      await prisma.aIIssue.create({
+        data: { productId: event.data.productId, severity: 'CRITICAL', description: event.data.error },
+      });
+    }
+  });
+
+  // ==================== STOCK PROTECTION EVENT LISTENER'LARI ====================
+  EventBus.on('HealthScoreUpdated', async (event: any) => {
+    const { productId, score } = event.data;
+    await WorkflowStateManager.syncFromProduct(productId);
+    SummaryService.clearCache();
+  });
+
+  EventBus.on('StockProtectionDecision', async (event: any) => {
+    const { productId, decision, marketplaceKey } = event.data;
+    await WorkflowStateManager.recordTimeline(
+      productId,
+      `Stok koruma: ${decision === 'CLOSE' ? 'İlan kapatıldı' : 'İlan açıldı'} (${marketplaceKey})`,
+      { decision }
+    );
+    SummaryService.clearCache();
+  });
+
   // ==================== DASHBOARD YENİLEME ====================
   EventBus.on('DashboardRefresh', async (event: any) => {
     SummaryService.clearCache();

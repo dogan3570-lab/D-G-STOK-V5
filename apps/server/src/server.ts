@@ -27,25 +27,85 @@ const __dirname = path.dirname(__filename);
 export function buildServer() {
   const app = express();
 
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // ==================== GÜVENLİK KATMANI V1 ====================
+  // Zero Trust Security Hardening
+  // =============================================================
+
+  // 1. HELMET - Güvenlik header'ları
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"], // React dev server için unsafe-inline gerekli
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          connectSrc: ["'self'", 'ws:', 'wss:'],
+          fontSrc: ["'self'", 'data:'],
+          objectSrc: ["'none'"],
+          mediaSrc: ["'self'"],
+          frameSrc: ["'none'"],
+        },
+      },
+      frameguard: { action: 'deny' },
+      hidePoweredBy: true,
+      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      ieNoOpen: true,
+      noSniff: true,
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      xssFilter: true,
+    })
+  );
+
   app.use(compression());
+
+  // 2. CORS - Development'ta geniş, Production'da whitelist
+  const corsWhitelist = process.env.CORS_ORIGIN
+    ?.split(',')
+    ?.map((s) => s.trim())
+    .filter(Boolean) ?? [];
+
   app.use(
     cors({
-      origin: process.env.CORS_ORIGIN?.split(',')?.map((s) => s.trim()).filter(Boolean) ?? true,
+      origin: (origin, callback) => {
+        // originsiz isteklere izin ver (sunucu->sunucu, mobile, aynı-origin)
+        if (!origin) return callback(null, true);
+        // Development'ta tüm localhost'lara izin ver
+        if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) return callback(null, true);
+        // Production whitelist
+        if (corsWhitelist.includes(origin)) return callback(null, true);
+        console.warn(`[CORS] Blocked origin: ${origin}`);
+        return callback(new Error('Not allowed by CORS'));
+      },
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'x-token', 'x-csrf-token'],
     })
   );
 
   app.use(express.json({ limit: '10mb' }));
   app.use(cookieParser());
-  app.use(morgan('dev'));
 
+  // 3. MORGAN - Production'da detayli log kapali
+  if (process.env.NODE_ENV === 'production') {
+    app.use(morgan('combined', {
+      skip: (req) => req.url === '/health' || req.url === '/api-status',
+    }));
+  } else {
+    app.use(morgan('dev', {
+      skip: (req) => req.url === '/health' || req.url === '/api-status',
+    }));
+  }
+
+  // 4. RATE LIMIT - Çok katmanlı
+  // Genel API rate limit (15 dk / 1000 istek)
   app.use(
     rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 1000,
       standardHeaders: true,
       legacyHeaders: false,
+      message: { ok: false, error: { code: 'RATE_LIMIT', message: 'too_many_requests' } },
     })
   );
 
@@ -61,8 +121,16 @@ export function buildServer() {
     });
   });
 
-  // Auth routes
-  app.post('/auth/login', async (req, res) => {
+  // Auth routes (sıkı rate limit ile - 15 dk / 20 deneme)
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { ok: false, error: { code: 'RATE_LIMIT', message: 'too_many_attempts' } },
+  });
+
+  app.post('/auth/login', authLimiter, async (req, res) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     const password = String(req.body?.password ?? '');
 

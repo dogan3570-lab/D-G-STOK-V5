@@ -38,6 +38,8 @@ model Marketplace {
   templates              ListingTemplate[]
   financeRecords         FinanceRecord[]
   categoryMappings       CategoryMapping[]
+  pricingRules           MarketplacePricingRule[]
+  stockRules             MarketplaceStockRule[]
 }
 
 model Product {
@@ -96,6 +98,10 @@ model Product {
   updatedAt              DateTime                @updatedAt
   marketplaceStates      ProductMarketplaceState[]
   variants               Variant[]
+  workflowState          WorkflowState?
+  workflowTimelines      WorkflowTimeline[]
+  salesReports           AISalesReport[]
+  profitHistories        AIProfitHistory[]
   xmlSource              XmlSource?              @relation(fields: [xmlSourceId], references: [id])
 
   @@index([variantMatch])
@@ -103,6 +109,10 @@ model Product {
   @@index([categoryId])
   @@index([brandId])
   @@index([status])
+  @@index([sku])
+  @@index([barcode])
+  @@index([categoryMatch, brandMatch, variantMatch, templateMatch])
+  @@index([xmlSourceId, status])
 }
 
 model ProductMarketplaceState {
@@ -122,6 +132,8 @@ model ProductMarketplaceState {
   marketplace   Marketplace   @relation(fields: [marketplaceId], references: [id])
 
   @@unique([productId, marketplaceId])
+  @@index([marketplaceId])
+  @@index([status])
 }
 
 model QueueJob {
@@ -211,6 +223,10 @@ model AuditLog {
   createdAt   DateTime @default(now())
 
   actorUser   User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([createdAt])
+  @@index([entity, action])
+  @@index([entityId])
 }
 
 model Category {
@@ -325,11 +341,17 @@ model Order {
   updatedAt     DateTime  @updatedAt
   shipments     Shipment[]
   financeRecords FinanceRecord[]
+
+  @@index([marketplaceId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Shipment {
   id            String    @id @default(uuid())
   orderId       String?
+
+  @@index([orderId])
   order         Order?    @relation(fields: [orderId], references: [id])
   channel       String
   cargoCompany  String
@@ -636,6 +658,8 @@ model WorkflowState {
   aiSuggested Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
 }
 
 model WorkflowTimeline {
@@ -645,6 +669,10 @@ model WorkflowTimeline {
   details     String?
   actorUserId String?
   createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
 }
 
 model MarketplaceTitleConfig {
@@ -736,6 +764,64 @@ model MarketplaceVariantRule {
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+// ==================== EKSİK MODELLER (Production Fix) ====================
+
+model MarketplacePricingRule {
+  id             String   @id @default(uuid())
+  marketplaceId  String
+  productId      String?
+  categoryId     String?
+  minPrice       Float    @default(0)
+  maxPrice       Float    @default(0)
+  applyVat       Boolean  @default(true)
+  profitMargin   Float    @default(0)
+  rounding       String   @default("NORMAL")
+  active         Boolean  @default(true)
+  priority       Int      @default(3)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  marketplace Marketplace @relation(fields: [marketplaceId], references: [id])
+
+  @@index([marketplaceId])
+  @@index([productId])
+  @@index([categoryId])
+}
+
+model ListingLog {
+  id               String   @id @default(uuid())
+  productId        String
+  marketplaceId    String
+  ruleId           String?
+  ruleType         String   @default("NONE")
+  purchasePrice    Float    @default(0)
+  vatIncludedPrice Float    @default(0)
+  profitMargin     Float    @default(0)
+  rounding         String   @default("NORMAL")
+  calculatedPrice  Float    @default(0)
+  status           String   @default("SUCCESS")
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+
+  @@index([productId])
+  @@index([marketplaceId])
+  @@index([createdAt])
+}
+
+model MarketplaceStockRule {
+  id               String   @id @default(uuid())
+  marketplaceId    String
+  minStock         Int      @default(5)
+  autoCloseEnabled Boolean  @default(true)
+  autoOpenEnabled  Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  marketplace Marketplace @relation(fields: [marketplaceId], references: [id])
+
+  @@unique([marketplaceId])
 }
 
 model VariantMapping {
@@ -1106,6 +1192,89 @@ model AIIssue {
   @@index([resolved])
 }
 
+// ==================== AI SALES & PROFIT ADVISOR V1 ====================
+// DG STOK V5.0 - AI Satış ve Karlılık Asistanı
+// ======================================================================
+
+model AISalesReport {
+  id                String   @id @default(uuid())
+  productId         String
+  marketplace       String   @default("trendyol")
+  buyPrice          Float    @default(0)
+  currentPrice      Float    @default(0)
+  recommendedPrice  Float    @default(0)
+  minimumPrice      Float    @default(0)
+  maximumPrice      Float    @default(0)
+  profit            Float    @default(0)
+  profitRate        Float    @default(0)
+  competitionLevel  Int      @default(0)
+  demandScore       Int      @default(0)
+  velocityScore     Int      @default(0)
+  stockRisk         String   @default("LOW")
+  recommendation    String   @default("HOLD")
+  confidence        Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([marketplace])
+  @@index([recommendation])
+  @@index([createdAt])
+}
+
+model AIProfitHistory {
+  id          String   @id @default(uuid())
+  productId   String
+  oldPrice    Float    @default(0)
+  newPrice    Float    @default(0)
+  oldProfit   Float    @default(0)
+  newProfit   Float    @default(0)
+  reason      String   @default("")
+  approved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([createdAt])
+}
+
+// ==================== AI COPILOT V1 ====================
+// DG STOK V5.0 - Doğal Dil ile Sistem Yönetimi
+// ======================================================
+
+model CopilotConversation {
+  id        String   @id @default(uuid())
+  userId    String   @default("anonymous")
+  question  String
+  answer    String
+  createdAt DateTime @default(now())
+
+  tasks CopilotTask[]
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model CopilotTask {
+  id              String              @id @default(uuid())
+  conversationId  String
+  module          String
+  action          String
+  status          String              @default("PENDING") // PENDING | APPROVED | RUNNING | COMPLETED | FAILED | REJECTED
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  result          String?
+  createdAt       DateTime            @default(now())
+
+  conversation CopilotConversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId])
+  @@index([status])
+  @@index([module])
+}
+
 model AIRecommendation {
   id          String    @id @default(uuid())
   issueId     String
@@ -1117,4 +1286,54 @@ model AIRecommendation {
   createdAt   DateTime  @default(now())
 
   @@index([issueId])
+}
+
+// ==================== AI IMAGE QUALITY CENTER V1 ====================
+// DG STOK V5.0 - AI Görsel Kalite Kontrol Modülü
+// ====================================================================
+
+model AIImageAnalysis {
+  id                String   @id @default(uuid())
+  productId         String
+  imageUrl          String
+  overallScore      Int      @default(0)
+  backgroundScore   Int      @default(0)
+  resolutionScore   Int      @default(0)
+  sharpnessScore    Int      @default(0)
+  lightingScore     Int      @default(0)
+  angleScore        Int      @default(0)
+  watermarkScore    Int      @default(0)
+  shadowScore       Int      @default(0)
+  marketplaceScore  Int      @default(0)
+  status            String   @default("PENDING") // PENDING | ANALYZING | COMPLETED | FAILED
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  issues AIImageIssue[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([overallScore])
+  @@index([createdAt])
+}
+
+model AIImageIssue {
+  id              String          @id @default(uuid())
+  analysisId      String
+  issueType       String          // BACKGROUND_ERROR | LOW_RESOLUTION | WATERMARK | SHADOW | ANGLE | BACKGROUND_DIRTY | BACKGROUND_MISSING
+  severity        String          @default("MEDIUM") // CRITICAL | HIGH | MEDIUM | LOW
+  confidence      Float           @default(0)
+  description     String?
+  recommendation  String?
+  approved        Boolean         @default(false)
+  resolved        Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  analysis AIImageAnalysis @relation(fields: [analysisId], references: [id])
+
+  @@index([analysisId])
+  @@index([issueType])
+  @@index([severity])
+  @@index([resolved])
 }

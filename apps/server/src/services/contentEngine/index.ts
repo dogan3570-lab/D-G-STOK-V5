@@ -538,8 +538,8 @@ export async function checkProductContent(
   const categoryResult = await checkCategory(product.categoryId);
   const descResult = checkDescription(product.description);
   const htmlResult = checkHtml(product.description);
-  const imageResult = checkImage(product.images, profile);
-  const barcodeResult = checkBarcode(product.barcode, profile);
+  const imageResult = checkImage(product.images, profile as any);
+  const barcodeResult = checkBarcode(product.barcode, profile as any);
   const priceResult = checkPrice(product.salePrice, product.purchasePrice);
   const forbiddenResult = await checkForbiddenWords(
     [product.title, product.description].filter(Boolean).join(' '),
