@@ -82,30 +82,44 @@ export default function MarketplaceControlCenter() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Mock veriler (gerçek API hazır olana kadar)
+  // Gerçek verileri API'den çek
   useEffect(() => {
-    setStockRules([
-      { marketplaceId: '1', marketplaceName: 'Trendyol', minStock: 3 },
-      { marketplaceId: '2', marketplaceName: 'Hepsiburada', minStock: 5 },
-      { marketplaceId: '3', marketplaceName: 'N11', minStock: 2 },
-    ]);
-    setAutoRules([
-      { id: '1', marketplaceId: '1', trigger: 'price_change', active: true },
-      { id: '2', marketplaceId: '1', trigger: 'stock_change', active: true },
-      { id: '3', marketplaceId: '2', trigger: 'brand_change', active: false },
-    ]);
-    setApiErrors([
-      { code: '400', description: 'Bad Request - Geçersiz ürün verisi', lastSeen: '2026-07-19 10:23', count: 5 },
-      { code: '401', description: 'Unauthorized - API anahtarı geçersiz', lastSeen: '2026-07-19 09:15', count: 2 },
-      { code: '429', description: 'Rate Limit Aşıldı - Çok fazla istek', lastSeen: '2026-07-18 22:00', count: 12 },
-      { code: '500', description: 'Sunucu Hatası - Trendyol API yanıt vermiyor', lastSeen: '2026-07-19 08:30', count: 3 },
-    ]);
-    setPerfData({ dailyCalls: 15420, avgResponse: 342, fastest: 'N11', slowest: 'Trendyol', successRate: 97.8 });
-    setNotifications([
-      { id: '1', type: 'auto_close', message: 'Stok koruma: 3 ürün Trendyol\'da yayından kaldırıldı', time: '2 dk önce', read: false },
-      { id: '2', type: 'auto_open', message: 'Stok koruma: 5 ürün Hepsiburada\'da yeniden yayına alındı', time: '15 dk önce', read: false },
-      { id: '3', type: 'maintenance', message: 'Trendyol API bakımı 22:00-23:00 arası', time: '1 saat önce', read: true },
-    ]);
+    const fetchMarketplaceData = async () => {
+      try {
+        // Her pazaryeri için durum bilgisini çek
+        const marketplaces = await apiFetch<{ items: MarketplaceItem[] }>('/marketplaces');
+        if (marketplaces.ok && marketplaces.data) {
+          const mpList = marketplaces.data.items || [];
+          
+          // Stok kuralları
+          const rules = mpList.map(mp => ({
+            marketplaceId: mp.id,
+            marketplaceName: mp.name,
+            minStock: 3,
+          }));
+          setStockRules(rules);
+
+          // API hataları (audit log'dan)
+          const logRes = await apiFetch<{ items: any[] }>('/marketplace/logs?action=error&days=7');
+          if (logRes.ok && logRes.data) {
+            const errorMap = new Map<string, { code: string; description: string; lastSeen: string; count: number }>();
+            for (const log of logRes.data.items) {
+              if (!log.success) {
+                const key = log.action || 'UNKNOWN';
+                if (!errorMap.has(key)) {
+                  errorMap.set(key, { code: key, description: log.details || log.action, lastSeen: log.createdAt, count: 0 });
+                }
+                errorMap.get(key)!.count++;
+              }
+            }
+            setApiErrors(Array.from(errorMap.values()));
+          }
+        }
+      } catch (e) {
+        console.error('Marketplace data fetch error:', e);
+      }
+    };
+    fetchMarketplaceData();
   }, []);
 
   const tabs = [
