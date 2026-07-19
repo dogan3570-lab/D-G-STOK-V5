@@ -975,3 +975,22 @@ model AIReport {
   createdAt       DateTime @default(now())
 }
 
+model AICategorySuggestion {
+  id                  String   @id @default(uuid())
+  productId           String
+  marketplace         String   @default("trendyol")
+  currentCategory     String?
+  currentCategoryId   String?
+  suggestedCategory   String?
+  suggestedCategoryId String?
+  confidence          Float?
+  reason              String?
+  approved            Boolean  @default(false)
+  approvedAt          DateTime?
+  createdAt           DateTime @default(now())
+
+  @@index([productId])
+  @@index([marketplace])
+  @@index([confidence])
+}
+

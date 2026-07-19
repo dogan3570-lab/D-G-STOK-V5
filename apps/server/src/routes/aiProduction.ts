@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { requireAuth, requireRole, type AuthedRequest } from '../auth/authMiddleware.ts';
 import { prisma } from '../db/prisma.ts';
 import { scanProduct, scanAllProducts, getDashboard } from '../services/aiProduction/scanner.ts';
+import { suggestCategory, scanAllCategories, approveSuggestion, rejectSuggestion } from '../services/aiProduction/categoryEngine.ts';
 import { EventBus } from '../services/eventBus/EventBus.ts';
 import { createCorrelationId } from '../services/eventBus/events.ts';
 
@@ -98,6 +99,80 @@ router.get('/report', requireAuth, async (_req, res) => {
     });
 
     res.json({ ok: true, dashboard, distribution, generatedAt: new Date().toISOString() });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// ==================== AI KATEGORİ MOTORU ENDPOINT'LERİ ====================
+
+// GET /ai/category/products - Kategori önerileri listesi
+router.get('/category/products', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit ?? 50)));
+    const status = req.query.status ? String(req.query.status) : undefined;
+    const marketplace = req.query.marketplace ? String(req.query.marketplace) : undefined;
+
+    const where: any = {};
+    if (marketplace) where.marketplace = marketplace;
+    if (status === 'pending') where.approved = false;
+    else if (status === 'approved') where.approved = true;
+
+    const [items, total] = await Promise.all([
+      prisma.aICategorySuggestion.findMany({
+        where, orderBy: { confidence: 'desc' },
+        skip: (page - 1) * limit, take: limit,
+      }),
+      prisma.aICategorySuggestion.count({ where }),
+    ]);
+
+    res.json({ ok: true, items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// GET /ai/category/:productId - Tek ürün kategori önerisi
+router.get('/category/:productId', requireAuth, async (req, res) => {
+  try {
+    const marketplaceKey = String(req.query.marketplace || 'trendyol');
+    const result = await suggestCategory(req.params.productId, marketplaceKey);
+    res.json({ ok: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// POST /ai/category/scan - Toplu kategori taraması
+router.post('/category/scan', requireAuth, requireRole(['ADMIN']), async (_req, res) => {
+  try {
+    const result = await scanAllCategories();
+    res.json({ ok: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// POST /ai/category/approve - Öneriyi onayla
+router.post('/category/approve', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    if (!suggestionId) return res.status(400).json({ ok: false, error: 'suggestionId gerekli' });
+    const result = await approveSuggestion(suggestionId);
+    res.json({ ok: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// POST /ai/category/reject - Öneriyi reddet
+router.post('/category/reject', requireAuth, async (req, res) => {
+  try {
+    const { suggestionId } = req.body;
+    if (!suggestionId) return res.status(400).json({ ok: false, error: 'suggestionId gerekli' });
+    const result = await rejectSuggestion(suggestionId);
+    res.json({ ok: true, ...result });
   } catch (error: any) {
     res.status(500).json({ ok: false, error: error.message });
   }
