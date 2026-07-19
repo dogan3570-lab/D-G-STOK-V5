@@ -14,6 +14,13 @@ export interface ProductSummary {
   errorProducts: number;
   draftProducts: number;
 
+  // XML KPI'ları
+  xmlNewProducts: number;
+  xmlUpdatedProducts: number;
+  xmlRemovedProducts: number;
+  xmlErrors: number;
+  lastSyncAt: string | null;
+
   // Stock Protection KPI'ları
   criticalStockProducts: number;
   autoClosedToday: number;
@@ -132,12 +139,25 @@ export class SummaryService {
     // missingInfo = En az bir adımı eksik olanlar
     const missingInfo = totalProducts - readyCount;
 
+    // Son XML import bilgisi
+    const lastImport = await prisma.xmlImportRun.findFirst({
+      orderBy: { startedAt: 'desc' },
+      select: { startedAt: true },
+    });
+
     const data: ProductSummary = {
       totalProducts,
       activeProducts: readyCount + needsReviewCount,
       passiveProducts: passiveCount,
       errorProducts: cannotSendCount,
       draftProducts: 0,
+
+      // XML KPI'ları
+      xmlNewProducts: 0,
+      xmlUpdatedProducts: 0,
+      xmlRemovedProducts: 0,
+      xmlErrors: 0,
+      lastSyncAt: lastImport?.startedAt?.toISOString() || null,
       
       // WorkflowState bazlı
       readyForListing: readyCount,

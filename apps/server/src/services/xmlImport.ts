@@ -1,5 +1,7 @@
 import { prisma } from '../db/prisma.ts';
 import { broadcast } from '../sse/websocket.ts';
+import { EventBus } from './eventBus/EventBus.ts';
+import { createCorrelationId } from './eventBus/events.ts';
 
 export type XmlImportResult = {
   ok: boolean;
@@ -777,6 +779,31 @@ export async function importXmlProducts(xml: string, options?: { actorUserId?: s
       } catch (err) {
         console.error('[V5] Auto-analysis init error:', err);
       }
+    }
+
+    // EventBus: Import tamamlandi event'i tetikle
+    try {
+      const productIds = results
+        .filter(r => r.outcome === 'created' || r.outcome === 'updated')
+        .map(r => r.xmlKey);
+      
+      if (productIds.length > 0) {
+        EventBus.emit({
+          type: 'ProductImportCompleted',
+          correlationId: createCorrelationId('XML'),
+          timestamp: new Date().toISOString(),
+          source: 'XmlImportEngine',
+          data: {
+            productIds,
+            sourceName: options?.sourceName || 'manual',
+            totalItems: items.length,
+            importedCount: totalImported,
+            updatedCount: totalUpdated,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('[XmlImport] EventBus error:', e);
     }
 
     return {

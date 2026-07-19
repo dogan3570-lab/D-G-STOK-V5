@@ -249,6 +249,23 @@ export interface DashboardRefreshEvent extends BaseEvent {
   };
 }
 
+// ==================== XML IMPORT EVENT'LERİ ====================
+
+/**
+ * XML import tamamlandığında tetiklenir.
+ * Product Pipeline bu event ile başlar.
+ */
+export interface ProductImportCompletedEvent extends BaseEvent {
+  type: 'ProductImportCompleted';
+  data: {
+    productIds: string[];
+    sourceName: string;
+    totalItems: number;
+    importedCount: number;
+    updatedCount: number;
+  };
+}
+
 // ==================== BİRLEŞİK EVENT TİPİ ====================
 
 export type AppEvent =
@@ -263,7 +280,8 @@ export type AppEvent =
   | VariantMatchChangedEvent
   | TemplateMatchChangedEvent
   | RecalculationTriggeredEvent
-  | DashboardRefreshEvent;
+  | DashboardRefreshEvent
+  | ProductImportCompletedEvent;
 
 // ==================== EVENT HANDLER TİPİ ====================
 
