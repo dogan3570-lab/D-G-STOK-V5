@@ -11,6 +11,7 @@ import { WorkflowStateManager } from './WorkflowStateManager.ts';
 import { AutoRecalculationEngine } from '../autoRecalculation/AutoRecalculationEngine.ts';
 import { SummaryService } from '../autoRecalculation/SummaryService.ts';
 import { DashboardService } from '../dashboard/DashboardService.ts';
+import { ReadyToSendEngine } from '../readyToSend/ReadyToSendEngine.ts';
 
 /**
  * Tüm EventBus listener'larını kaydeder.
@@ -199,6 +200,61 @@ export function registerWorkflowEventListeners(): void {
       `readiness: ${d.oldReadiness}→${d.newReadiness}, ` +
       `değişenAlanlar: ${d.changedFields.join(',')} [${event.correlationId}]`
     );
+
+    // Pipeline: WorkflowState READY olursa ReadyToSendEngine tetiklenir
+    if (d.newStatus === 'READY' || (d.newReadiness >= 100 && d.oldReadiness < 100)) {
+      try {
+        const rts = await ReadyToSendEngine.checkProduct(d.productId);
+        if (rts.ready) {
+          await WorkflowStateManager.recordTimeline(
+            d.productId, 'Ready To Send',
+            { score: rts.score, checks: Object.keys(rts.checks).filter(k => (rts.checks as any)[k]) }
+          );
+          console.log(`[Pipeline] Urun hazir: ${d.productId} (skor: ${rts.score}) [${event.correlationId}]`);
+        }
+      } catch (e) {
+        console.error(`[Pipeline] ReadyToSend kontrol hatasi: ${d.productId}`, e);
+      }
+    }
+  });
+
+  // ==================== XML IMPORT TAMAMLANDI ====================
+  // XML import sonrasi pipeline otomatik baslar
+  EventBus.on('ProductImportCompleted', async (event: any) => {
+    const { productIds, sourceName, totalItems } = event.data;
+    const correlationId = event.correlationId;
+    console.log(
+      `[EventListeners] ProductImportCompleted: ${totalItems} ürün, ` +
+      `kaynak: ${sourceName} [${correlationId}]`
+    );
+
+    const startTime = Date.now();
+
+    // Her urun icin WorkflowState olustur
+    for (const productId of productIds) {
+      await prisma.workflowState.upsert({
+        where: { productId },
+        update: { status: 'XML_IMPORTED' },
+        create: { productId, status: 'XML_IMPORTED', readiness: 10 },
+      });
+      await WorkflowStateManager.recordTimeline(
+        productId, 'XML Imported',
+        { source: sourceName, correlationId }
+      );
+    }
+
+    // AutoRecalculation tetikle
+    for (const productId of productIds) {
+      await AutoRecalculationEngine.onProductChanged(productId, 'xml_import');
+    }
+
+    SummaryService.clearCache();
+    DashboardService.clearCache();
+
+    console.log(
+      `[EventListeners] ProductImportCompleted tamam: ` +
+      `${totalItems} ürün, ${Date.now() - startTime}ms [${correlationId}]`
+    );
   });
 
   // ==================== STOK DEĞİŞİKLİĞİ ====================
@@ -237,6 +293,23 @@ export function registerWorkflowEventListeners(): void {
       `[EventListeners] ProductStockChanged tamam: ` +
       `${totalProducts} ürün işlendi, ${Date.now() - startTime}ms [${correlationId}]`
     );
+  });
+
+  // ==================== READY_TOSEND OTOMATİK TETİKLEME ====================
+  // Cascade sonrasi WorkflowState READY olursa ReadyToSendEngine tetiklenir
+  EventBus.on('WorkflowStateChanged', async (event: any) => {
+    const d = event.data;
+    if (d.newStatus === 'READY') {
+      // ReadyToSendEngine otomatik kontrol
+      const rts = await ReadyToSendEngine.checkProduct(d.productId);
+      if (rts.ready) {
+        await WorkflowStateManager.recordTimeline(
+          d.productId, 'Ready To Send',
+          { score: rts.score, checks: rts.checks }
+        );
+        console.log(`[Pipeline] Urun hazir: ${d.productId} (skor: ${rts.score})`);
+      }
+    }
   });
 
   // ==================== DASHBOARD YENİLEME ====================
