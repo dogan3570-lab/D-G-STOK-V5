@@ -8,6 +8,7 @@
 // ======================================================================
 
 import { prisma } from '../../db/prisma.ts';
+import { WorkflowStateManager } from '../workflow/WorkflowStateManager.ts';
 import { MarketplaceAdapter, DefaultMarketplaceAdapter, AdapterHealthScore } from './MarketplaceAdapter.ts';
 import { getAdapter } from './AdapterRegistry.ts';
 import { EventBus } from '../eventBus/EventBus.ts';
@@ -977,6 +978,26 @@ export class StockProtectionEngine {
         triggerType: action.triggerType,
       },
     });
+
+    // Timeline kaydı ekle (WorkflowState ile entegrasyon)
+    try {
+      await WorkflowStateManager.recordTimeline(
+        action.productId,
+        `Stok koruma: ${action.action === 'CLOSED' ? 'İlan kapatıldı' : 'İlan açıldı'} (${action.marketplaceKey})`,
+        {
+          action: action.action,
+          decision: action.decision,
+          marketplaceKey: action.marketplaceKey,
+          stock: action.stockAfter,
+          criticalLevel: action.criticalLevel,
+          reason: action.reason,
+          success: action.success,
+          apiResponse: action.apiResponse || action.errorMessage || null,
+        }
+      );
+    } catch (e) {
+      console.error('[StockProtection] Timeline error:', e);
+    }
   }
 
   // ==================== RAPORLAMA ====================

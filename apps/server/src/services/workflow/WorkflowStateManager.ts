@@ -528,6 +528,42 @@ export class WorkflowStateManager {
   }
 
   /**
+   * Ürün stoğu değiştiğinde WorkflowState'i günceller
+   * StockProtectionEngine ile entegre çalışır
+   */
+  static async updateStockStatus(
+    productId: string,
+    currentStock: number,
+    criticalLevel: number
+  ): Promise<void> {
+    const ws = await prisma.workflowState.findUnique({ where: { productId } });
+    if (!ws) return;
+
+    let newStatus = ws.status;
+
+    if (currentStock <= 0) {
+      newStatus = 'OUT_OF_STOCK';
+    } else if (currentStock <= criticalLevel) {
+      newStatus = 'LOW_STOCK';
+    } else if (currentStock > criticalLevel && (ws.status === 'LOW_STOCK' || ws.status === 'OUT_OF_STOCK' || ws.status === 'MARKETPLACE_CLOSED')) {
+      newStatus = 'RESTOCKED';
+    }
+
+    if (newStatus !== ws.status) {
+      await prisma.workflowState.update({
+        where: { productId },
+        data: { status: newStatus },
+      });
+
+      await this.recordTimeline(
+        productId,
+        `Stok durumu değişti: ${ws.status} → ${newStatus} (stok: ${currentStock}, kritik: ${criticalLevel})`,
+        { oldStatus: ws.status, newStatus, stock: currentStock, criticalLevel }
+      );
+    }
+  }
+
+  /**
    * WorkflowTimeline'a kayıt ekler
    */
   static async recordTimeline(

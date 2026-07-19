@@ -6,6 +6,7 @@
 
 import { EventBus } from '../eventBus/EventBus.ts';
 import { createCorrelationId } from '../eventBus/events.ts';
+import { prisma } from '../../db/prisma.ts';
 import { WorkflowStateManager } from './WorkflowStateManager.ts';
 import { AutoRecalculationEngine } from '../autoRecalculation/AutoRecalculationEngine.ts';
 import { SummaryService } from '../autoRecalculation/SummaryService.ts';
@@ -197,6 +198,44 @@ export function registerWorkflowEventListeners(): void {
       `${d.oldStatus}→${d.newStatus}, ` +
       `readiness: ${d.oldReadiness}→${d.newReadiness}, ` +
       `değişenAlanlar: ${d.changedFields.join(',')} [${event.correlationId}]`
+    );
+  });
+
+  // ==================== STOK DEĞİŞİKLİĞİ ====================
+  // XML Import → StockChanged → WorkflowState → StockProtection
+  EventBus.on('ProductStockChanged', async (event: any) => {
+    const { products, xmlSourceId, totalProducts } = event.data;
+    const correlationId = event.correlationId;
+    console.log(
+      `[EventListeners] ProductStockChanged: ${totalProducts} ürün, ` +
+      `XML kaynağı: ${xmlSourceId} [${correlationId}]`
+    );
+
+    const startTime = Date.now();
+
+    for (const product of products) {
+      // WorkflowState'i stok durumuna göre güncelle
+      const product2 = await prisma.product.findUnique({
+        where: { id: product.productId },
+        select: { id: true, criticalStockLevel: true, minStock: true },
+      });
+      if (product2) {
+        const criticalLevel = product2.criticalStockLevel ?? product2.minStock ?? 3;
+        await WorkflowStateManager.updateStockStatus(
+          product.productId,
+          product.newStock,
+          criticalLevel
+        );
+      }
+    }
+
+    // Cache'leri temizle
+    SummaryService.clearCache();
+    DashboardService.clearCache();
+
+    console.log(
+      `[EventListeners] ProductStockChanged tamam: ` +
+      `${totalProducts} ürün işlendi, ${Date.now() - startTime}ms [${correlationId}]`
     );
   });
 

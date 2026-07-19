@@ -14,6 +14,12 @@ export interface ProductSummary {
   errorProducts: number;
   draftProducts: number;
 
+  // Stock Protection KPI'ları
+  criticalStockProducts: number;
+  autoClosedToday: number;
+  autoOpenedToday: number;
+  stockApiErrors: number;
+
   // ReadyToSend KPI'lari
   readyForListing: number;
   publishedProducts: number;
@@ -153,6 +159,12 @@ export class SummaryService {
       workflowHasIssues: hasIssuesCount,
       workflowCannotSend: cannotSendCount,
       avgReadiness: readinessCount > 0 ? Math.round(readinessTotal / readinessCount) : 0,
+
+      // Stock Protection KPI'ları
+      criticalStockProducts: statusMap['LOW_STOCK'] || 0,
+      autoClosedToday: statusMap['MARKETPLACE_CLOSED'] || 0,
+      autoOpenedToday: statusMap['MARKETPLACE_OPENED'] || 0,
+      stockApiErrors: 0,
 
       timestamp: new Date().toISOString(),
     };
