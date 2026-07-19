@@ -35,6 +35,13 @@ apps/server/tests/
 apps/server/vitest.config.ts
 apps/server/prisma/seed-*.mjs
 
+# SSL sertifikaları (production)
+ssl/*.pem
+ssl/*.key
+
+# Veritabanı yedekleri
+backups/
+
 # Geçici scriptler
 apps/server/*.mjs
 apps/server/*.cjs

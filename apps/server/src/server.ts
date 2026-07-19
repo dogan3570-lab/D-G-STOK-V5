@@ -163,9 +163,10 @@ export function buildServer() {
   if (isProduction) {
     // Try multiple possible locations for the built frontend
     const possiblePaths = [
-      path.join(__dirname, '../../web/dist'),          // monorepo: apps/server/dist -> apps/web/dist
-      path.join(__dirname, '../../../apps/web/dist'),  // fallback
+      path.join(__dirname, '../../web/dist'),          // monorepo: compiled: apps/server/dist -> apps/web/dist
+      path.join(__dirname, '../../../apps/web/dist'),  // fallback from compiled
       path.join(process.cwd(), 'apps/web/dist'),       // cwd based
+      path.join(__dirname, '../../apps/web/dist'),     // tsx runtime: apps/server/src -> apps/web/dist
     ];
 
     let webDistPath = '';

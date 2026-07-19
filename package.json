@@ -12,13 +12,19 @@
     "dev:server": "npm run dev --workspace apps/server",
     "dev:full": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
     "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces"
+    "lint": "npm run lint --workspaces",
+    "test": "vitest run --config vitest.integration.config.ts",
+    "test:coverage": "vitest run --coverage",
+    "start:ci": "NODE_ENV=test REDIS_URL=redis://localhost:6379 node apps/server/src/index.js"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/ui": "^4.1.10",
     "concurrently": "^9.0.0",
     "prisma": "^5.22.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@babel/core": "^7.29.7",

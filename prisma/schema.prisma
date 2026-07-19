@@ -27,6 +27,8 @@ model Marketplace {
   apiUrl                 String?
   apiStatus              String                  @default("unknown")
   active                 Boolean                 @default(true)
+  merchantId             String?
+  storeId                String?
   settings               String?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
@@ -57,10 +59,14 @@ model Product {
   brand                  Brand?                  @relation(fields: [brandId], references: [id])
   categoryMatch          Boolean                 @default(false)
   variantMatch           Boolean                 @default(false)
+  variantStatus          String                  @default("WAITING_AI")
   brandMatch             Boolean                 @default(false)
   templateMatch          Boolean                 @default(false)
   stock                  Int                     @default(0)
   minStock               Int                     @default(0)
+  criticalStockLevel     Int?
+  autoStockManagement    Boolean                 @default(false)
+  lastStockCheckAt       DateTime?
   purchasePrice          Float?
   salePrice              Float?
   vatRate                Float?
@@ -208,16 +214,17 @@ model AuditLog {
 }
 
 model Category {
-  id          String    @id @default(uuid())
-  name        String    @unique
-  externalId  String?
-  parentId    String?
-  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children    Category[] @relation("CategoryHierarchy")
-  products    Product[]
-  mappings    CategoryMapping[] @relation("CategoryMappings")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  name            String    @unique
+  externalId      String?
+  parentId        String?
+  parent          Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children        Category[] @relation("CategoryHierarchy")
+  variantRequired Boolean   @default(true)
+  products        Product[]
+  mappings        CategoryMapping[] @relation("CategoryMappings")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model CategoryMapping {

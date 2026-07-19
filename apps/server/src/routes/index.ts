@@ -409,6 +409,25 @@ router.post('/debug/seed-admin', async (_req, res) => {
   return res.json({ ok: true, created: admin });
 });
 
+// Seed test user for CI/CD integration tests
+router.post('/debug/seed-test-user', async (_req, res) => {
+  const existing = await prisma.user.count({ where: { email: 'test@dgstok.com' } });
+  if (existing > 0) {
+    return res.json({ ok: true, skipped: true, message: 'Test user already exists' });
+  }
+
+  const hashedPassword = await bcrypt.hash('test123456', 10);
+  const testUser = await prisma.user.create({
+    data: {
+      email: 'test@dgstok.com',
+      password: hashedPassword,
+      role: 'ADMIN',
+    },
+  });
+
+  return res.json({ ok: true, created: testUser });
+});
+
 // Brand route'ları apps/server/src/routes/brands.ts dosyasına taşındı
 
 // ==================== ORDERS ====================

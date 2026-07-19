@@ -1382,4 +1382,20 @@ router.post('/bulk-ai-suggest', requireAuth, async (req, res) => {
   } catch (error) { console.error('[variants] POST bulk-ai-suggest error:', error); return res.status(500).json({ error: { code: 'DB_ERROR', message: 'Toplu AI öneri başarısız' } }); }
 });
 
+// GET /variants/types - Return available variant types/attributes
+router.get('/types', requireAuth, async (_req, res) => {
+  try {
+    // Get unique variant names from existing variants
+    const variantNames = await prisma.variant.findMany({
+      select: { name: true },
+      distinct: ['name'],
+      orderBy: { name: 'asc' },
+    });
+    const items = variantNames.map(v => v.name);
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'SERVER_ERROR', message: 'Varyant tipleri alınamadı' } });
+  }
+});
+
 export default router;

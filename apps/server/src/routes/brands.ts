@@ -562,4 +562,40 @@ router.post('/undo/:logId', requireAuth, requireRole(['ADMIN']), async (req: Req
   } catch (error) { console.error('[brands] POST undo error:', error); res.status(500).json({ error: { code: 'DB_ERROR', message: 'Geri alma ba\u015far\u0131s\u0131z' } }); }
 });
 
+// ==================== CRUD ENDPOINTS ====================
+
+// GET /brands - Public list
+router.get('/', async (_req: Request, res: Response) => {
+  try {
+    const items = await prisma.brand.findMany({ orderBy: { name: 'asc' } });
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'SERVER_ERROR', message: 'Markalar alınamadı' } });
+  }
+});
+
+// POST /brands - Create brand
+router.post('/', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'name zorunludur' } });
+    }
+    const item = await prisma.brand.create({ data: { name: String(name).trim() } });
+    return res.status(201).json({ item });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'SERVER_ERROR', message: 'Marka oluşturulamadı' } });
+  }
+});
+
+// DELETE /brands/:id - Delete brand
+router.delete('/:id', requireAuth, requireRole(['ADMIN', 'OPERATOR']), async (req: Request, res: Response) => {
+  try {
+    await prisma.brand.delete({ where: { id: req.params.id } });
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Marka bulunamadı' } });
+  }
+});
+
 export default router;

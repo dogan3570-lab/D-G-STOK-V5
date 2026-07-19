@@ -1,82 +1,108 @@
+# ============================================
+# DG STOK V5.0 - Production Docker Compose
+# ============================================
+# Usage:
+#   docker compose build
+#   docker compose up -d
+#   docker compose logs -f
+# ============================================
+
 services:
+  # ==================== PostgreSQL Database ====================
   postgres:
     image: postgres:16-alpine
     container_name: dgstok-postgres
     environment:
-      POSTGRES_DB: dg_store
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: ${DB_DATABASE:-dg_store}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres123}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-dg_store}"]
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 10s
     restart: unless-stopped
     networks:
       - dgstok-network
 
+  # ==================== NestJS Backend API ====================
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: dgstok-backend
+    env_file: ./backend/.env
     ports:
       - "3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
-      DB_TYPE: postgres
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USERNAME: postgres
-      DB_PASSWORD: postgres123
-      DB_DATABASE: dg_store
-      DB_SYNCHRONIZE: "true"
-      DB_LOGGING: "false"
-      DB_POOL_SIZE: 20
-      JWT_SECRET: dgstok-production-jwt-secret-key-min-32-chars!!
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres123}
+      DB_DATABASE: ${DB_DATABASE:-dg_store}
+      JWT_SECRET: ${JWT_SECRET:-dgstok-production-jwt-secret-key-min-32-chars!!}
       JWT_EXPIRES_IN: 15m
-      JWT_REFRESH_SECRET: dgstok-production-refresh-secret-key-min-32-chars!!
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dgstok-production-refresh-secret-key-min-32-chars!!}
       JWT_REFRESH_EXPIRES_IN: 7d
-      MARKETPLACE_ENCRYPTION_SECRET: dgstok-encryption-secret-key-32-chars!!
-      FRONTEND_URL: http://localhost
-      CORS_ORIGIN: http://localhost,http://nginx
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost,http://localhost:3001,http://nginx}
+      MARKETPLACE_ENCRYPTION_SECRET: ${MARKETPLACE_ENCRYPTION_SECRET:-dgstok-encryption-secret-key-32-chars!!}
       RATE_LIMIT_TTL_MS: 60000
       RATE_LIMIT_MAX_REQUESTS: 200
+      DB_SSL: ${DB_SSL:-false}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
     restart: unless-stopped
     networks:
       - dgstok-network
 
+  # ==================== Next.js Frontend ====================
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${FRONTEND_URL:-http://localhost}/api
     container_name: dgstok-frontend
+    env_file: ./frontend/.env
     ports:
       - "3001:3001"
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://localhost:3000/api
+      NEXT_PUBLIC_API_URL: ${FRONTEND_URL:-http://localhost}/api
+      NEXT_TELEMETRY_DISABLED: 1
     depends_on:
       - backend
     restart: unless-stopped
     networks:
       - dgstok-network
 
+  # ==================== Nginx Reverse Proxy ====================
   nginx:
     image: nginx:alpine
     container_name: dgstok-nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - certbot_data:/var/www/certbot
     depends_on:
       - backend
       - frontend
@@ -84,8 +110,49 @@ services:
     networks:
       - dgstok-network
 
+  # ==================== Redis (for BullMQ/Queues - Optional) ====================
+  redis:
+    image: redis:7-alpine
+    container_name: dgstok-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispass123}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - dgstok-network
+    profiles:
+      - with-redis
+
+  # ==================== SSL Certificate Renewal (Certbot) ====================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: dgstok-certbot
+    volumes:
+      - ./ssl:/etc/letsencrypt
+      - certbot_data:/var/www/certbot
+    entrypoint: >
+      sh -c "certbot certonly --webroot --webroot-path=/var/www/certbot
+      -d '$${DOMAIN}'
+      --email '$${SSL_EMAIL}'
+      --agree-tos
+      --non-interactive
+      --keep-until-expiring"
+    profiles:
+      - certbot-only
+    networks:
+      - dgstok-network
+
 volumes:
   postgres_data:
+  redis_data:
+  certbot_data:
 
 networks:
   dgstok-network:

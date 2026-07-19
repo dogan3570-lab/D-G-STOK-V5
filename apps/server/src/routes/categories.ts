@@ -8,6 +8,67 @@ import { matchCategory } from '../services/aiEngine.ts';
 
 const router = Router();
 
+// ==================== LIST (PUBLIC) ====================
+router.get('/', async (_req: Request, res: Response) => {
+  try {
+    const items = await prisma.category.findMany({
+      orderBy: { name: 'asc' },
+    });
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'SERVER_ERROR', message: 'Kategoriler alınamadı' } });
+  }
+});
+
+// POST /categories - Create category
+router.post('/', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { name, parentId, variantRequired } = req.body;
+    if (!name) {
+      return res.status(400).json({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'name zorunludur' } });
+    }
+    const created = await prisma.category.create({
+      data: {
+        name: String(name).trim(),
+        parentId: parentId || null,
+        variantRequired: variantRequired === true,
+      },
+    });
+    return res.status(201).json(created);
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: { code: 'SERVER_ERROR', message: 'Kategori oluşturulamadı' } });
+  }
+});
+
+// PUT /categories/:id - Update category
+router.put('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { name, parentId, variantRequired } = req.body;
+    const data: Record<string, unknown> = {};
+    if (name !== undefined) data.name = String(name).trim();
+    if (parentId !== undefined) data.parentId = parentId || null;
+    if (variantRequired !== undefined) data.variantRequired = variantRequired === true;
+
+    const updated = await prisma.category.update({
+      where: { id: req.params.id },
+      data,
+    });
+    return res.json(updated);
+  } catch (error) {
+    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Kategori bulunamadı' } });
+  }
+});
+
+// DELETE /categories/:id - Delete category
+router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    await prisma.category.delete({ where: { id: req.params.id } });
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Kategori bulunamadı' } });
+  }
+});
+
 // ==================== STATS ====================
 router.get('/stats', requireAuth, async (_req: Request, res: Response) => {
   try {

@@ -38,8 +38,8 @@ export async function analyzeVariantV2(
   input: VariantAnalysisInput
 ): Promise<VariantAnalysisV2> {
   const checks: VariantCheck[] = [];
-  let decision: VariantDecision = 'MANUAL_REVIEW';
-  let confidence = 0;
+  let decision: VariantDecision = 'NO_VARIANT_NEEDED';
+  let confidence = 100;
   const reasons: string[] = [];
 
   // === KONTROL 1: XML'de varyant bilgisi var mi? ===
@@ -52,17 +52,24 @@ export async function analyzeVariantV2(
       : 'XML\'de varyant bilgisi yok',
   });
 
-  if (hasXmlVariants) {
-    // Varyantlar gecerli mi?
-    const validVariants = input.existingVariants.filter(
-      v => v.name && v.name.length > 0 && v.value && v.value.length > 0
-    );
-    if (validVariants.length > 0) {
-      decision = 'AUTO_ACCEPTED';
-      confidence = 95;
-      reasons.push(`XML'de ${validVariants.length} gecerli varyant bulundu`);
-      return buildResult(input.productId, decision, confidence, reasons, checks, 'xml');
-    }
+  // KURAL 1 & 5: XML'de gerçek varyant yoksa ürün NORMAL ÜRÜN kabul edilir.
+  // Kullanıcıdan manuel varyant istenmez, Manual Review oluşturulmaz.
+  if (!hasXmlVariants) {
+    decision = 'NO_VARIANT_NEEDED';
+    confidence = 100;
+    reasons.push('XML\'de varyant bilgisi bulunamadı. Ürün varyantsız kabul edildi.');
+    return buildResult(input.productId, decision, confidence, reasons, checks, 'xml');
+  }
+
+  // KURAL 6: Gerçek varyant tespit edildi, varyantlar gecerli mi?
+  const validVariants = input.existingVariants.filter(
+    v => v.name && v.name.length > 0 && v.value && v.value.length > 0
+  );
+  if (validVariants.length > 0) {
+    decision = 'AUTO_ACCEPTED';
+    confidence = 95;
+    reasons.push(`XML'de ${validVariants.length} gecerli varyant bulundu`);
+    return buildResult(input.productId, decision, confidence, reasons, checks, 'xml');
   }
 
   // === KONTROL 2: Kategori varyant gerektiriyor mu? ===

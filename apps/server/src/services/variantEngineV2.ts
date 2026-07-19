@@ -169,7 +169,7 @@ function skuPrefix(sku: string): string {
 }
 
 function categoryNeedsVariant(categoryName: string | null): boolean {
-  if (!categoryName) return true; // Bilinmiyorsa varsayılan olarak varyant gerekli
+  if (!categoryName) return false; // Bilinmiyorsa varyant gerekmez
   const lower = categoryName.toLowerCase();
   for (const noVariant of NO_VARIANT_CATEGORIES) {
     if (lower.includes(noVariant)) return false;
@@ -306,13 +306,15 @@ function analyzeVariantRequirement(
   const hasNumberInTitle = product.title ? extractNumbers(product.title).length > 0 : false;
 
   // Üründe hiç varyant yoksa ve ürün adında da renk/beden/numara yoksa
-  // ve kategori varyant gerektirmiyorsa → varyant gerekmez
+  // ve kategori varyant gerektirmiyorsa veya kategori bilinmiyorsa → varyant gerekmez
   if (!hasAnyVariant && !hasColorInTitle && !hasSizeInTitle && !hasNumberInTitle) {
-    // Kategori varyant gerektiriyor mu? Emin değilsek varsayalım
-    if (categoryName && !categoryNeedsVariant(categoryName)) {
+    // Kategori bilinmiyor veya varyant gerektirmiyor
+    if (!categoryName || !categoryNeedsVariant(categoryName)) {
       return {
         needsVariant: false,
-        reason: `${categoryName} varyantsız yayınlanabilir`,
+        reason: categoryName
+          ? `${categoryName} varyantsız yayınlanabilir`
+          : 'Kategori bilinmiyor, ürün varyantsız kabul edildi',
         score: 100,
       };
     }

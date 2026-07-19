@@ -6,7 +6,8 @@ const EnvSchema = z.object({
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   CORS_ORIGIN: z.string().optional(),
   JWT_SECRET: z.string().min(8).default('dev-secret-change-me'),
-  JWT_EXPIRES_IN: z.string().optional()
+  JWT_EXPIRES_IN: z.string().optional(),
+  VARIANT_ENGINE: z.string().optional().default('v5')
 });
 
 export const env = EnvSchema.parse({
@@ -15,6 +16,7 @@ export const env = EnvSchema.parse({
   REDIS_URL: process.env.REDIS_URL,
   CORS_ORIGIN: process.env.CORS_ORIGIN,
   JWT_SECRET: process.env.JWT_SECRET,
-  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN,
+  VARIANT_ENGINE: process.env.VARIANT_ENGINE
 });
 
