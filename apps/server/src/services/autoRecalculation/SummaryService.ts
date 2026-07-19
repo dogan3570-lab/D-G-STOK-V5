@@ -66,11 +66,8 @@ export class SummaryService {
     // ===== TEK KAYNAK: WorkflowState =====
     const [
       workflowStats,
-      totalProducts, activeProducts, passiveProducts, draftProducts,
-      errorProducts, newToday,
-      missingImages, missingBarcode, missingDescription,
-      missingPrice, missingStock, missingSeo,
-      publishedProducts, pendingProductsCount, rejectedProducts,
+      totalProducts,
+      missingCategory, missingBrand, missingVariant, missingTemplate,
     ] = await Promise.all([
       // WorkflowState'den tek sorgu
       prisma.workflowState.groupBy({
@@ -79,26 +76,14 @@ export class SummaryService {
         _avg: { readiness: true },
       }),
       
-      // Product temel sayıları
-      prisma.product.count(),
-      prisma.product.count({ where: { status: 'READY' } }),
-      prisma.product.count({ where: { status: 'PASSIVE' } }),
-      prisma.product.count({ where: { status: 'DRAFT' } }),
-      prisma.product.count({ where: { status: 'ERROR' } }),
-      prisma.product.count({ where: { createdAt: { gte: todayStart } } }),
+      // Ürün sayısı (WorkflowState kaydı olan ürünler)
+      prisma.workflowState.count(),
 
-      // Eksik bilgiler (Product'tan - çünkü bunlar WorkflowState'de yok)
-      prisma.product.count({ where: { images: null } }),
-      prisma.product.count({ where: { barcode: null } }),
-      prisma.product.count({ where: { description: null } }),
-      prisma.product.count({ where: { salePrice: null } }),
-      prisma.product.count({ where: { stock: { lte: 0 } } }),
-      prisma.product.count({ where: { seoTitle: null, seoDescription: null } }),
-
-      // ReadyToSend ek KPI'lari
-      prisma.product.count({ where: { status: 'PUBLISHED' } }),
-      prisma.product.count({ where: { status: 'PENDING' } }),
-      prisma.product.count({ where: { status: 'REJECTED' } }),
+      // Eksik bilgiler (WorkflowState üzerinden)
+      prisma.workflowState.count({ where: { stepCategory: 'MISSING' } }),
+      prisma.workflowState.count({ where: { stepBrand: 'MISSING' } }),
+      prisma.workflowState.count({ where: { stepVariant: 'MISSING' } }),
+      prisma.workflowState.count({ where: { stepTitle: 'MISSING' } }),
     ]);
 
     // WorkflowState'den KPI'lar
@@ -126,44 +111,47 @@ export class SummaryService {
       prisma.workflowState.count({ where: { stepTitle: 'MISSING' } }),
     ]);
 
-    // readyForListing = Tüm adımları tamam olanlar (WorkflowState)
-    const readyForListing = workflowReady;
+    const readyCount = statusMap['READY'] || 0;
+    const needsReviewCount = statusMap['NEEDS_REVIEW'] || 0;
+    const hasIssuesCount = statusMap['HAS_ISSUES'] || 0;
+    const cannotSendCount = statusMap['CANNOT_SEND'] || 0;
+    const passiveCount = statusMap['PASSIVE'] || 0;
 
     // missingInfo = En az bir adımı eksik olanlar
-    const missingInfo = (await prisma.workflowState.count()) - workflowReady;
+    const missingInfo = totalProducts - readyCount;
 
     const data: ProductSummary = {
       totalProducts,
-      activeProducts,
-      passiveProducts,
-      errorProducts,
-      draftProducts,
+      activeProducts: readyCount + needsReviewCount,
+      passiveProducts: passiveCount,
+      errorProducts: cannotSendCount,
+      draftProducts: 0,
       
       // WorkflowState bazlı
-      readyForListing,
-      publishedProducts,
-      pendingProducts: pendingProductsCount,
-      rejectedProducts,
+      readyForListing: readyCount,
+      publishedProducts: readyCount,
+      pendingProducts: needsReviewCount + hasIssuesCount,
+      rejectedProducts: cannotSendCount,
       
       // WorkflowState'den eksik bilgiler
       missingInfo,
-      pendingCategory,
-      pendingBrand,
-      pendingVariant,
-      pendingTemplate,
-      missingImages,
-      missingBarcode,
-      missingDescription,
-      missingPrice,
-      missingStock,
-      missingSeo,
+      pendingCategory: missingCategory,
+      pendingBrand: missingBrand,
+      pendingVariant: missingVariant,
+      pendingTemplate: missingTemplate,
+      missingImages: 0,
+      missingBarcode: 0,
+      missingDescription: 0,
+      missingPrice: 0,
+      missingStock: 0,
+      missingSeo: 0,
       variantAnalysisPending: 0,
 
       // WorkflowState KPI'ları
-      workflowReady,
-      workflowNeedsReview,
-      workflowHasIssues,
-      workflowCannotSend,
+      workflowReady: readyCount,
+      workflowNeedsReview: needsReviewCount,
+      workflowHasIssues: hasIssuesCount,
+      workflowCannotSend: cannotSendCount,
       avgReadiness: readinessCount > 0 ? Math.round(readinessTotal / readinessCount) : 0,
 
       timestamp: new Date().toISOString(),

@@ -38,6 +38,15 @@ export function registerWorkflowEventListeners(): void {
       source
     );
 
+    // Timeline kaydı ekle
+    for (const productId of productIds) {
+      await WorkflowStateManager.recordTimeline(
+        productId,
+        `Kategori ${newValue ? 'eşleştirildi' : 'eşleştirmesi kaldırıldı'}`,
+        { source, count: productCount }
+      );
+    }
+
     // AutoRecalculation'ı tetikle
     for (const productId of productIds) {
       await AutoRecalculationEngine.onProductChanged(productId, 'category_match');
@@ -73,6 +82,15 @@ export function registerWorkflowEventListeners(): void {
       source
     );
 
+    // Timeline kaydı ekle
+    for (const productId of productIds) {
+      await WorkflowStateManager.recordTimeline(
+        productId,
+        `Marka ${newValue ? 'eşleştirildi' : 'eşleştirmesi kaldırıldı'}`,
+        { source, count: productCount }
+      );
+    }
+
     for (const productId of productIds) {
       await AutoRecalculationEngine.onProductChanged(productId, 'brand_match');
     }
@@ -106,6 +124,15 @@ export function registerWorkflowEventListeners(): void {
       source
     );
 
+    // Timeline kaydı ekle
+    for (const productId of productIds) {
+      await WorkflowStateManager.recordTimeline(
+        productId,
+        `Varyant ${newValue ? 'eşleştirildi' : 'eşleştirmesi kaldırıldı'}`,
+        { source, count: productCount }
+      );
+    }
+
     for (const productId of productIds) {
       await AutoRecalculationEngine.onProductChanged(productId, 'variant_match');
     }
@@ -138,6 +165,15 @@ export function registerWorkflowEventListeners(): void {
       newValue,
       source
     );
+
+    // Timeline kaydı ekle
+    for (const productId of productIds) {
+      await WorkflowStateManager.recordTimeline(
+        productId,
+        `Şablon ${newValue ? 'eşleştirildi' : 'eşleştirmesi kaldırıldı'}`,
+        { source, count: productCount }
+      );
+    }
 
     for (const productId of productIds) {
       await AutoRecalculationEngine.onProductChanged(productId, 'template_match');

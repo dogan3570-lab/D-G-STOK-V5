@@ -170,6 +170,54 @@ router.get('/events', requireAuth, async (_req, res) => {
   }
 });
 
+// ==================== READY TO SEND ====================
+
+// GET /api/workflow-state/ready-to-send/:productId - Tek ürün için RTS kontrolü
+router.get('/ready-to-send/:productId', requireAuth, async (req, res) => {
+  try {
+    const result = await WorkflowStateManager.calculateReadyToSend(req.params.productId);
+    res.json({ ok: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// GET /api/workflow-state/ready-to-send - Hazır ürünlerin listesi
+router.get('/ready-to-send', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page ?? 1));
+    const limit = Math.min(100, Math.max(10, Number(req.query.limit ?? 50)));
+    const [items, total] = await Promise.all([
+      prisma.workflowState.findMany({
+        where: { status: 'READY' },
+        orderBy: { readiness: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.workflowState.count({ where: { status: 'READY' } }),
+    ]);
+    res.json({ ok: true, items, total, page, limit });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// ==================== TIMELINE ====================
+
+// GET /api/workflow-state/timeline/:productId - Ürün zaman çizelgesi
+router.get('/timeline/:productId', requireAuth, async (req, res) => {
+  try {
+    const timeline = await prisma.workflowTimeline.findMany({
+      where: { productId: req.params.productId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    res.json({ ok: true, items: timeline });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // ==================== DEBUG / TEST ====================
 
 // POST /api/workflow-state/test/cascade - Cascade testi

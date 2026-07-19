@@ -477,4 +477,72 @@ export class WorkflowStateManager {
 
     return count;
   }
+
+  /**
+   * ADIM 6: READY_TO_SEND hesaplama motoru
+   * WorkflowState üzerinden eksiksizlik kontrolü yapar.
+   *
+   * @returns { ready, score, missing }
+   */
+  static async calculateReadyToSend(productId: string): Promise<{
+    ready: boolean;
+    score: number;
+    missing: string[];
+  }> {
+    const ws = await prisma.workflowState.findUnique({ where: { productId } });
+    if (!ws) {
+      return { ready: false, score: 0, missing: ['WORKFLOW_STATE_NOT_FOUND'] };
+    }
+
+    const missing: string[] = [];
+    let score = 0;
+
+    // XML kaynağı var mı? (10 puan)
+    score += 10;
+
+    // Kategori eşleşmiş mi? (20 puan)
+    if (ws.stepCategory === 'OK') score += 20;
+    else missing.push('CATEGORY');
+
+    // Marka eşleşmiş mi? (15 puan)
+    if (ws.stepBrand === 'OK') score += 15;
+    else missing.push('BRAND');
+
+    // Varyant tamam mı? (20 puan)
+    if (ws.stepVariant === 'OK') score += 20;
+    else missing.push('VARIANT');
+
+    // Listing Template tamam mı? (25 puan)
+    if (ws.stepTitle === 'OK') score += 25;
+    else missing.push('TEMPLATE');
+
+    // Zorunlu alanlar eksiksiz mi? (10 puan)
+    if (ws.errorCount === 0) score += 10;
+    else missing.push('VALIDATION_ERRORS');
+
+    return {
+      ready: missing.length === 0 && ws.status === 'READY',
+      score,
+      missing,
+    };
+  }
+
+  /**
+   * WorkflowTimeline'a kayıt ekler
+   */
+  static async recordTimeline(
+    productId: string,
+    event: string,
+    details?: Record<string, unknown>,
+    actorUserId?: string | null
+  ): Promise<void> {
+    await prisma.workflowTimeline.create({
+      data: {
+        productId,
+        event,
+        details: details ? JSON.stringify(details) : null,
+        actorUserId: actorUserId || null,
+      },
+    });
+  }
 }
