@@ -14,16 +14,27 @@ interface ProductItem {
   purchasePrice: number | null; salePrice: number | null; vatRate: number | null;
   profitMargin: number | null; images: string | null; status: string;
   errorMessage: string | null; aiScore: number | null;
-  categoryMatch: boolean; brandMatch: boolean; variantMatch: boolean; templateMatch: boolean;
+  categoryMatch?: boolean; brandMatch?: boolean; variantMatch?: boolean; templateMatch?: boolean;
   categoryId: string | null; brandId: string | null; xmlSourceId: string | null;
   supplierCategory: string | null;
-  prefixEnabled?: boolean;  // Drawer detay için
-  computedTitle?: string | null; // Drawer detay için
+  prefixEnabled?: boolean;
+  computedTitle?: string | null;
   category?: { id: string; name: string } | null;
   brand?: { id: string; name: string } | null;
   xmlSource?: { id: string; name: string; company?: string | null } | null;
   variants?: Array<{ id: string; name: string; value: string }>;
   createdAt: string; updatedAt: string;
+  // WorkflowState verileri
+  readiness?: number;
+  readinessColor?: string;
+  readinessLabel?: string;
+  workflowStatus?: string;
+  stepCategory?: string;
+  stepBrand?: string;
+  stepVariant?: string;
+  stepTitle?: string;
+  // Marketplace durumları
+  marketplaceStates?: Array<{ key: string; name: string; status: string }>;
 }
 
 interface Pagination { page: number; limit: number; total: number; totalPages: number; }
@@ -65,6 +76,11 @@ function ProductDrawer({ product, onClose }: { product: ProductItem | null; onCl
     { key: 'log', label: 'Log', icon: '📝' },
   ];
 
+  // Readiness score
+  const readinessScore = p.aiScore ?? 0;
+  const readinessColor = readinessScore >= 100 ? 'bg-green-500' : readinessScore >= 70 ? 'bg-yellow-400' : 'bg-red-500';
+  const readinessLabel = readinessScore >= 100 ? 'Hazır' : readinessScore >= 70 ? 'Bekliyor' : 'Eksik';
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-2xl bg-slate-800 border-l border-slate-700 h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -77,6 +93,19 @@ function ProductDrawer({ product, onClose }: { product: ProductItem | null; onCl
           <button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-700 hover:text-white ml-3 shrink-0">
             ✕
           </button>
+        </div>
+
+        {/* Readiness Bar */}
+        <div className="px-4 py-3 border-b border-slate-700">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-slate-400">Hazırlık Skoru</span>
+            <span className={`text-xs font-bold ${readinessScore >= 100 ? 'text-green-400' : readinessScore >= 70 ? 'text-yellow-400' : 'text-red-400'}`}>
+              {readinessScore}% - {readinessLabel}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${readinessColor}`} style={{ width: `${Math.min(100, readinessScore)}%` }} />
+          </div>
         </div>
 
         {/* Tabs */}
