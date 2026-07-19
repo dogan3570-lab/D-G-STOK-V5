@@ -912,3 +912,66 @@ model VariantThreshold {
   @@index([key])
 }
 
+// ==================== AI PRODUCTION CENTER TABLOLARI ====================
+
+model AICheck {
+  id                    String   @id @default(uuid())
+  productId             String   @unique
+  categoryStatus        String   @default("PENDING") // OK | WARNING | ERROR | PENDING
+  brandStatus           String   @default("PENDING")
+  variantStatus         String   @default("PENDING")
+  barcodeStatus         String   @default("PENDING")
+  imageStatus           String   @default("PENDING")
+  titleStatus           String   @default("PENDING")
+  descriptionStatus     String   @default("PENDING")
+  seoStatus             String   @default("PENDING")
+  priceStatus           String   @default("PENDING")
+  stockStatus           String   @default("PENDING")
+  listingTemplateStatus String   @default("PENDING")
+  workflowStatus        String   @default("PENDING")
+  overallScore          Int      @default(0)
+  overallStatus         String   @default("ERROR") // PERFECT | GOOD | WARNING | ERROR
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model AITask {
+  id             String    @id @default(uuid())
+  productId      String
+  taskType       String    // CATEGORY | BRAND | VARIANT | TITLE | SEO | DESCRIPTION | IMAGE | PRICE
+  currentValue   String?
+  suggestedValue String?
+  confidence     Float?
+  status         String    @default("PENDING") // PENDING | APPROVED | REJECTED | APPLIED
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([productId])
+  @@index([taskType])
+  @@index([status])
+}
+
+model AIJob {
+  id             String    @id @default(uuid())
+  jobType        String    // FULL_SCAN | CATEGORY_SCAN | BRAND_SCAN
+  status         String    @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED
+  progress       Int       @default(0)
+  processedCount Int       @default(0)
+  totalCount     Int       @default(0)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+model AIReport {
+  id              String   @id @default(uuid())
+  scanDate        DateTime @default(now())
+  totalProducts   Int      @default(0)
+  healthyProducts Int      @default(0)
+  warningProducts Int      @default(0)
+  errorProducts   Int      @default(0)
+  averageScore    Float    @default(0)
+  createdAt       DateTime @default(now())
+}
+
