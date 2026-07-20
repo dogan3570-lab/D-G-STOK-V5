@@ -132,6 +132,7 @@ export default function MarketplaceControlCenter() {
     { key: 'bulk', label: 'Toplu İşlemler', icon: '📋' },
     { key: 'performance', label: 'Performans', icon: '📈' },
     { key: 'ai', label: 'AI Danışman', icon: '🧠' },
+    { key: 'closed', label: 'Satışa Kapalı', icon: '🔒' },
     { key: 'notifications', label: 'Bildirimler', icon: '🔔' },
   ];
 
@@ -182,6 +183,7 @@ export default function MarketplaceControlCenter() {
           {activeTab === 'bulk' && <BulkOperationsTab marketplaces={marketplaces} onDone={fetchAll} />}
           {activeTab === 'performance' && <PerformanceTab data={perfData} />}
           {activeTab === 'ai' && <AiAdvisorTab />}
+          {activeTab === 'closed' && <ClosedProductsTab />}
           {activeTab === 'notifications' && <NotificationTab items={notifications} onUpdate={setNotifications} />}
         </>
       )}
@@ -308,7 +310,7 @@ function OverviewTab({ marketplaces, onRefresh }: { marketplaces: MarketplaceIte
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">🔌 Pazaryeri Bağlantıları</h3>
-        <button onClick={() => { setEditingMp(null); setFormData({ name: '', key: '', apiKey: '', apiSecret: '', apiUrl: '' }); setShowModal(true); }}
+        <button onClick={() => { setEditingMp(null); setFormData({ name: '', key: '', apiKey: '', apiSecret: '', apiUrl: '', merchantId: '', storeId: '' }); setShowModal(true); }}
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">+ Yeni Ekle</button>
       </div>
 
@@ -548,6 +550,101 @@ function StockProtectionTab({ rules, onUpdate, criticalItems }: {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== SATIŞA KAPALI ÜRÜNLER SEKMESİ ====================
+function ClosedProductsTab() {
+  const [products, setProducts] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const limit = 20;
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [r, s] = await Promise.all([
+      apiFetch<any>(`/marketplace/closed-products?page=${page}&limit=${limit}`),
+      apiFetch<any>('/marketplace/closed-products/stats'),
+    ]);
+    if (r.ok && r.data) setProducts(r.data.items || []);
+    if (s.ok && s.data) setStats(s.data.stats);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, [page]);
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      {stats && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+            <div className="text-xs text-red-400 font-semibold uppercase">Stok = 0</div>
+            <div className="text-lg font-black text-red-400 mt-1">{stats.zeroStock}</div>
+          </div>
+          <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-3">
+            <div className="text-xs text-yellow-400 font-semibold uppercase">Min. Stok Altı</div>
+            <div className="text-lg font-black text-yellow-400 mt-1">{stats.belowMinStock}</div>
+          </div>
+          <div className="rounded-xl border border-slate-500/20 bg-slate-500/5 p-3">
+            <div className="text-xs text-slate-400 font-semibold uppercase">Kapalı İlanlar</div>
+            <div className="text-lg font-black text-slate-400 mt-1">{stats.totalClosedMarketplaces}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Products Table */}
+      <div className="rounded-xl border border-slate-700 bg-slate-800/30 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[700px]">
+            <thead className="bg-slate-700/80 sticky top-0 z-10">
+              <tr>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Ürün</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">SKU</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold text-slate-400">Stok</th>
+                <th className="px-3 py-3 text-right text-xs font-semibold text-slate-400">Min. Stok</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Durum</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-slate-400">Pazaryerleri</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700/50">
+              {loading ? (
+                <tr><td colSpan={6} className="text-center py-12"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent mx-auto" /></td></tr>
+              ) : products.length === 0 ? (
+                <tr><td colSpan={6} className="text-center py-12 text-sm text-slate-500">✅ Tüm ürünler satışa uygun</td></tr>
+              ) : products.map((p: any) => (
+                <tr key={p.id} className="hover:bg-slate-700/30">
+                  <td className="px-3 py-2.5">
+                    <div className="text-sm font-medium text-white truncate max-w-[200px]" title={p.title}>{p.title || p.xmlKey}</div>
+                    <div className="text-[10px] text-slate-500">{p.xmlSource?.name || '-'}</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-xs text-slate-400">{p.sku || '-'}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={`text-sm font-bold ${(p.stock ?? 0) <= 0 ? 'text-red-400' : 'text-yellow-400'}`}>{p.stock ?? 0}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-sm text-slate-400">{p.minStock ?? '-'}</td>
+                  <td className="px-3 py-2.5">
+                    <span className={`text-xs font-medium ${(p.stock ?? 0) <= 0 ? 'text-red-400' : 'text-yellow-400'}`}>
+                      {(p.stock ?? 0) <= 0 ? '🔴 Stok Yok' : '⚠️ Düşük Stok'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex gap-1 flex-wrap">
+                      {(p.marketplaceStates || []).map((ms: any) => (
+                        <span key={ms.id} className={`text-[10px] px-1.5 py-0.5 rounded ${ms.status === 'CLOSED' ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                          {ms.marketplace?.name || '?'}: {ms.status === 'CLOSED' ? 'Kapalı' : 'Açık'}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

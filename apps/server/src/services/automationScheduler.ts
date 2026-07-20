@@ -1,5 +1,9 @@
 import { prisma } from '../db/prisma.ts';
 import { fetchXmlFromUrl, importXmlProducts } from './xmlImport.ts';
+import { StockProtectionEngine } from './stockProtection/StockProtectionEngine.ts';
+import { WorkflowStateManager } from './workflow/WorkflowStateManager.ts';
+import { EventBus } from './eventBus/EventBus.ts';
+import { createCorrelationId } from './eventBus/events.ts';
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isRunning = false;
@@ -136,6 +140,122 @@ async function executeRule(rule: any) {
             }
           }
         }
+        break;
+      }
+
+      case 'stock_protection': {
+        // ================================================================
+        // OTOMATİK STOK KORUMA TARAMASI
+        // Tüm ürünleri tara, stok < minStock olanları pazaryerinde kapat
+        // ================================================================
+        const engine = new StockProtectionEngine();
+        const scanStart = Date.now();
+        
+        // Düşük stoklu ürünleri bul
+        const lowStockProducts = await prisma.product.findMany({
+          where: {
+            stock: { lte: 5 },
+          },
+          select: { id: true, sku: true, stock: true, minStock: true, title: true, salePrice: true },
+          take: 500,
+        });
+
+        let closed = 0, opened = 0, errors = 0;
+        
+        for (const product of lowStockProducts) {
+          const criticalLevel = product.minStock || 5;
+          const isCritical = (product.stock ?? 0) <= criticalLevel;
+          
+          try {
+            // Tüm pazaryeri durumlarını kontrol et
+            const mpStates = await prisma.productMarketplaceState.findMany({
+              where: { productId: product.id },
+              include: { marketplace: { select: { key: true, name: true } } },
+            });
+
+            for (const mpState of mpStates) {
+              const decision = isCritical ? 'CLOSE' : 'OPEN';
+              
+              if (isCritical && mpState.status !== 'CLOSED') {
+                // Kapat
+                await prisma.productMarketplaceState.update({
+                  where: { id: mpState.id },
+                  data: { status: 'CLOSED', lastActionAt: new Date() },
+                });
+                closed++;
+                
+                (EventBus.emit as any)({
+                  type: 'StockProtectionDecision',
+                  correlationId: createCorrelationId('API'),
+                  timestamp: new Date().toISOString(),
+                  source: 'StockProtectionScanner',
+                  data: {
+                    productId: product.id,
+                    productName: product.title || product.sku || 'Unknown',
+                    marketplaceKey: mpState.marketplace?.key || 'unknown',
+                    marketplaceName: mpState.marketplace?.name || 'Unknown',
+                    decision: 'CLOSE',
+                    currentStock: product.stock ?? 0,
+                    criticalLevel,
+                    success: true,
+                  },
+                });
+                
+                await WorkflowStateManager.recordTimeline(
+                  product.id,
+                  `🟢 Stok koruma: ${mpState.marketplace?.name || 'Pazaryeri'} ilanı kapatıldı (stok:${product.stock})`,
+                  { decision: 'CLOSE', criticalLevel }
+                );
+                
+              } else if (!isCritical && mpState.status === 'CLOSED') {
+                // Aç
+                await prisma.productMarketplaceState.update({
+                  where: { id: mpState.id },
+                  data: { status: 'ACTIVE', lastActionAt: new Date() },
+                });
+                opened++;
+                
+                (EventBus.emit as any)({
+                  type: 'StockProtectionDecision',
+                  correlationId: createCorrelationId('API'),
+                  timestamp: new Date().toISOString(),
+                  source: 'StockProtectionScanner',
+                  data: {
+                    productId: product.id,
+                    productName: product.title || product.sku || 'Unknown',
+                    marketplaceKey: mpState.marketplace?.key || 'unknown',
+                    marketplaceName: mpState.marketplace?.name || 'Unknown',
+                    decision: 'OPEN',
+                    currentStock: product.stock ?? 0,
+                    criticalLevel,
+                    success: true,
+                  },
+                });
+                
+                await WorkflowStateManager.recordTimeline(
+                  product.id,
+                  `🟢 Stok koruma: ${mpState.marketplace?.name || 'Pazaryeri'} ilanı açıldı (stok:${product.stock})`,
+                  { decision: 'OPEN', criticalLevel }
+                );
+              }
+            }
+          } catch (e) {
+            errors++;
+            console.error(`[StockProtection] Error for product ${product.id}:`, e);
+          }
+        }
+        
+        console.log(`[StockProtection] Scan complete: ${closed} closed, ${opened} opened, ${errors} errors in ${Date.now() - scanStart}ms`);
+        
+        // Dashboard'u güncelle
+        EventBus.emit({
+          type: 'DashboardRefresh',
+          correlationId: createCorrelationId('API'),
+          timestamp: new Date().toISOString(),
+          source: 'StockProtectionScanner',
+          data: { reason: 'stock_protection_scan', affectedModules: ['StockProtection', 'Marketplace'] },
+        });
+        
         break;
       }
 

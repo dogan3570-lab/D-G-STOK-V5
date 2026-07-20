@@ -331,7 +331,7 @@ export function registerWorkflowEventListeners(): void {
   EventBus.on('ImageIssueDetected', async (event: any) => {
     const { productId, issues } = event.data;
     // AI Command Center'a issue olarak ekle
-    await prisma.aIIssue.create({
+    await (prisma.aIIssue.create as any)({
       data: { productId, severity: 'HIGH', description: JSON.stringify(issues || []) },
     });
     SummaryService.clearCache();
@@ -412,7 +412,7 @@ export function registerWorkflowEventListeners(): void {
     });
     // AI Command Center'a issue olarak ekle
     if (event.data.productId) {
-      await prisma.aIIssue.create({
+      await (prisma.aIIssue.create as any)({
         data: { productId: event.data.productId, severity: 'CRITICAL', description: event.data.error },
       });
     }

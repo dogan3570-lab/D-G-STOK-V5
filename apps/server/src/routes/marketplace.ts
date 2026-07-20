@@ -152,4 +152,93 @@ router.post('/:key/open', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/marketplace/closed-products - Satışa Kapalı Ürünler
+router.get('/closed-products', requireAuth, async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Number(req.query.limit) || 50);
+    const search = req.query.search ? String(req.query.search) : '';
+
+    const where: any = {
+      OR: [
+        { stock: { lte: 0 } },
+        { stock: { lte: prisma.product.fields.minStock } },
+      ],
+    };
+    if (search) {
+      where.OR = [
+        { title: { contains: search } },
+        { sku: { contains: search } },
+        { xmlKey: { contains: search } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.product.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { stock: 'asc' },
+        select: {
+          id: true, title: true, sku: true, xmlKey: true, barcode: true,
+          stock: true, minStock: true, salePrice: true, purchasePrice: true,
+          status: true, createdAt: true,
+          category: { select: { id: true, name: true } },
+          brand: { select: { id: true, name: true } },
+          xmlSource: { select: { id: true, name: true } },
+          marketplaceStates: {
+            select: {
+              id: true, status: true, marketplaceId: true,
+              marketplace: { select: { key: true, name: true } },
+            },
+          },
+        },
+      }),
+      prisma.product.count({ where }),
+    ]);
+
+    res.json({ ok: true, items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// GET /api/marketplace/closed-products/stats - İstatistikler
+router.get('/closed-products/stats', requireAuth, async (_req, res) => {
+  try {
+    const [zeroStock, belowMinStock, totalClosed] = await Promise.all([
+      prisma.product.count({ where: { stock: { lte: 0 } } }),
+      prisma.product.count({ where: { stock: { lte: prisma.product.fields.minStock } } }),
+      prisma.productMarketplaceState.count({ where: { status: 'CLOSED' } }),
+    ]);
+    res.json({ ok: true, stats: { zeroStock, belowMinStock, totalClosedMarketplaces: totalClosed } });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Auto Stock Certification Report (log-only, no UI)
+router.get('/stock-cert-report', requireAuth, async (_req, res) => {
+  try {
+    const [total, zeroStock, closedMP, rules] = await Promise.all([
+      prisma.product.count(),
+      prisma.product.count({ where: { stock: { lte: 0 } } }),
+      prisma.productMarketplaceState.count({ where: { status: 'CLOSED' } }),
+      (prisma as any).marketplaceStockRule.findMany(),
+    ]);
+    const report = {
+      timestamp: new Date().toISOString(),
+      totalProducts: total,
+      zeroStockProducts: zeroStock,
+      closedMarketplaceListings: closedMP,
+      stockRules: rules.length,
+      status: zeroStock === 0 && closedMP === 0 ? 'ALL_OK' : 'ACTIONS_NEEDED',
+      summary: `DG STOK V5.0 Auto Stock Certification: ${zeroStock} ürün stoksuz, ${closedMP} pazaryeri ilanı kapalı`,
+    };
+    res.json({ ok: true, report });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 export default router;

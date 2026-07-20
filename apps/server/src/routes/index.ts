@@ -304,7 +304,7 @@ router.get('/marketplace/logs', requireAuth, async (req, res) => {
     const where: Record<string, unknown> = {
       createdAt: { gte: since },
     };
-    if (action) where.action = { contains: action, mode: 'insensitive' };
+    if (action) where.action = { contains: action };
     if (entity) where.entity = entity;
     if (success !== null) where.success = success;
 
