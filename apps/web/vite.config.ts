@@ -35,6 +35,10 @@ export default defineConfig({
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
+      '/marketplace': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
       '/dashboard': {
         target: 'http://localhost:4000',
         changeOrigin: true,
